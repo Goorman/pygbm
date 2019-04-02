@@ -260,11 +260,8 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
 
                 tic_pred = time()
 
-                # prepare leaves_data so that _update_raw_predictions can be
-                # @njitted
-                leaves_data = [(l.value, l.sample_indices)
-                               for l in grower.finalized_leaves]
-                _update_raw_predictions(leaves_data, raw_predictions[:, k])
+                grower.update_raw_predictions(raw_predictions[:, k])
+
                 toc_pred = time()
                 acc_prediction_time += toc_pred - tic_pred
 
@@ -714,25 +711,3 @@ class GradientBoostingClassifier(BaseGradientBoostingMachine, ClassifierMixin):
                 return _LOSSES['categorical_crossentropy']()
 
         return _LOSSES[self.loss]()
-
-
-@njit(parallel=True)
-def _update_raw_predictions(leaves_data, raw_predictions):
-    """Update raw_predictions by reading the predictions of the ith tree
-    directly form the leaves.
-
-    Can only be used for predicting the training data. raw_predictions
-    contains the sum of the tree values from iteration 0 to i - 1. This adds
-    the predictions of the ith tree to raw_predictions.
-
-    Parameters
-    ----------
-    leaves_data: list of tuples (leaf.value, leaf.sample_indices)
-        The leaves data used to update raw_predictions.
-    raw_predictions : array-like, shape=(n_samples,)
-        The raw predictions for the training data.
-    """
-    for leaf_idx in prange(len(leaves_data)):
-        leaf_value, sample_indices = leaves_data[leaf_idx]
-        for sample_idx in sample_indices:
-            raw_predictions[sample_idx] += leaf_value
