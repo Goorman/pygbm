@@ -1,8 +1,8 @@
 from time import time
 import numpy as np
 from joblib import Memory
-from pygbm.histogram import _build_histogram_naive
-from pygbm.histogram import _build_histogram
+from pygbm.plain.histogram import _build_histogram_naive
+from pygbm.plain.histogram import _build_histogram
 
 
 m = Memory(location='/tmp')

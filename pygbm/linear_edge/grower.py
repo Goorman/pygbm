@@ -192,7 +192,7 @@ class TreeGrower:
         self.finalized_leaves = []
         self.total_find_split_time = 0.  # time spent finding the best splits
         self.total_apply_split_time = 0.  # time spent splitting nodes
-        self._intilialize_root()
+        self._initialize_root()
         self.n_nodes = 1
 
     def _validate_parameters(self, X_binned, max_leaf_nodes, max_depth,
@@ -234,7 +234,7 @@ class TreeGrower:
         while self.can_split_further():
             self.split_next()
 
-    def _intilialize_root(self):
+    def _initialize_root(self):
         """Initialize root node and finalize it if needed."""
         n_samples = self.X_binned.shape[0]
         depth = 0

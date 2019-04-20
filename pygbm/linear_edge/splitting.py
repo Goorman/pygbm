@@ -15,7 +15,7 @@ from .histogram import _build_histogram_no_hessian
 from .histogram import _build_histogram_root
 from .histogram import _build_histogram_root_no_hessian
 from .histogram import HISTOGRAM_DTYPE
-from .utils import get_threads_chunks
+from ..utils import get_threads_chunks
 
 
 @jitclass([
