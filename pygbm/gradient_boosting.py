@@ -13,7 +13,8 @@ from sklearn.metrics import check_scoring
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 
-from pygbm.plain.grower import TreeGrower
+#from pygbm.plain.grower import TreeGrower
+from pygbm.pwl.grower import TreeGrower
 from pygbm.binning import BinMapper
 from pygbm.loss import _LOSSES
 
@@ -23,7 +24,7 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
 
     @abstractmethod
     def __init__(self, loss, learning_rate, max_iter, max_leaf_nodes,
-                 max_depth, min_samples_leaf, l2_regularization, max_bins,
+                 max_depth, min_samples_leaf, w_l2_reg, b_l2_reg, max_bins,
                  scoring, validation_split, n_iter_no_change, tol, verbose,
                  random_state):
         self.loss = loss
@@ -32,7 +33,8 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
         self.max_leaf_nodes = max_leaf_nodes
         self.max_depth = max_depth
         self.min_samples_leaf = min_samples_leaf
-        self.l2_regularization = l2_regularization
+        self.w_l2_reg = w_l2_reg
+        self.b_l2_reg = b_l2_reg
         self.max_bins = max_bins
         self.n_iter_no_change = n_iter_no_change
         self.validation_split = validation_split
@@ -147,8 +149,8 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
             # stratify for classification
             stratify = y if hasattr(self.loss_, 'predict_proba') else None
 
-            X_binned_train, X_binned_val, y_train, y_val = train_test_split(
-                X_binned, y, test_size=self.validation_split,
+            X_binned_train, X_binned_val, y_train, y_val, X_train, X_val = train_test_split(
+                X_binned, y, X, test_size=self.validation_split,
                 stratify=stratify, random_state=rng)
             if X_binned_train.size == 0 or X_binned_val.size == 0:
                 raise ValueError(
@@ -161,9 +163,11 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
             # on Fortran arrays.
             X_binned_val = np.ascontiguousarray(X_binned_val)
             X_binned_train = np.asfortranarray(X_binned_train)
+            X_train = np.asfortranarray(X_train)
+            X_val = np.ascontiguousarray(X_val)
         else:
-            X_binned_train, y_train = X_binned, y
-            X_binned_val, y_val = None, None
+            X_binned_train, y_train, X_train = X_binned, y, X
+            X_binned_val, y_val, X_val = None, None, None
 
         # Subsample the training set for score-based monitoring.
         if do_early_stopping:
@@ -171,13 +175,13 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
             n_samples_train = X_binned_train.shape[0]
             if n_samples_train > subsample_size:
                 indices = rng.choice(X_binned_train.shape[0], subsample_size)
-                X_binned_small_train = X_binned_train[indices]
+                X_small_train = X_train[indices]
                 y_small_train = y_train[indices]
             else:
-                X_binned_small_train = X_binned_train
+                X_small_train = X_train
                 y_small_train = y_train
             # Predicting is faster of C-contiguous arrays.
-            X_binned_small_train = np.ascontiguousarray(X_binned_small_train)
+            X_small_train = np.ascontiguousarray(X_small_train)
 
         if self.verbose:
             print("Fitting gradient boosted rounds:")
@@ -212,11 +216,11 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
         if do_early_stopping:
             # Add predictions of the initial model (before the first tree)
             self.train_scores_.append(
-                self._get_scores(X_binned_train, y_train))
+                self._get_scores(X_train, y_train))
 
             if self.validation_split is not None:
                 self.validation_scores_.append(
-                    self._get_scores(X_binned_val, y_val))
+                    self._get_scores(X_val, y_val))
 
         for iteration in range(self.max_iter):
 
@@ -230,7 +234,7 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
                                                      y_train, raw_predictions)
 
             predictors.append([])
-
+#            import pdb; pdb.set_trace()
             # Build `n_trees_per_iteration` trees.
             for k, (gradients_at_k, hessians_at_k) in enumerate(zip(
                     np.array_split(gradients, self.n_trees_per_iteration_),
@@ -241,15 +245,19 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
                 # whole array.
 
                 grower = TreeGrower(
-                    X_binned_train, gradients_at_k, hessians_at_k,
+                    X_binned_train, X_train, gradients_at_k, hessians_at_k,
                     max_bins=self.max_bins,
                     n_bins_per_feature=n_bins_per_feature,
                     max_leaf_nodes=self.max_leaf_nodes,
                     max_depth=self.max_depth,
                     min_samples_leaf=self.min_samples_leaf,
-                    l2_regularization=self.l2_regularization,
+                    w_l2_reg=self.w_l2_reg,
+                    b_l2_reg=self.b_l2_reg,
                     shrinkage=self.learning_rate)
                 grower.grow()
+
+#                import pdb;
+#                pdb.set_trace()
 
                 acc_apply_split_time += grower.total_apply_split_time
                 acc_find_split_time += grower.total_find_split_time
@@ -267,8 +275,8 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
             should_early_stop = False
             if do_early_stopping:
                 should_early_stop = self._check_early_stopping(
-                    X_binned_small_train, y_small_train,
-                    X_binned_val, y_val)
+                    X_small_train, y_small_train,
+                    X_val, y_val)
 
             if self.verbose:
                 self._print_iteration_stats(iteration_start_time,
@@ -299,19 +307,19 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
         self.validation_scores_ = np.asarray(self.validation_scores_)
         return self
 
-    def _check_early_stopping(self, X_binned_train, y_train,
-                              X_binned_val, y_val):
+    def _check_early_stopping(self, X_train, y_train,
+                              X_val, y_val):
         """Check if fitting should be early-stopped.
 
         Scores are computed on validation data or on training data.
         """
 
         self.train_scores_.append(
-            self._get_scores(X_binned_train, y_train))
+            self._get_scores(X_train, y_train))
 
         if self.validation_split is not None:
             self.validation_scores_.append(
-                self._get_scores(X_binned_val, y_val))
+                self._get_scores(X_val, y_val))
             return self._should_stop(self.validation_scores_)
 
         return self._should_stop(self.train_scores_)
@@ -405,15 +413,7 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
                 f'X has {X.shape[1]} features but this estimator was '
                 f'trained with {self.n_features_} features.'
             )
-        is_binned = X.dtype == np.uint8
-        if not is_binned and self.bin_mapper_ is None:
-            raise ValueError(
-                'This estimator was fitted with pre-binned data and '
-                'can only predict pre-binned data as well. If your data *is* '
-                'already pre-binnned, convert it to uint8 using e.g. '
-                'X.astype(np.uint8). If the data passed to fit() was *not* '
-                'pre-binned, convert it to float32 and call fit() again.'
-            )
+
         n_samples = X.shape[0]
         raw_predictions = np.zeros(
             shape=(n_samples, self.n_trees_per_iteration_),
@@ -423,9 +423,7 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
         # Should we parallelize this?
         for predictors_of_ith_iteration in self.predictors_:
             for k, predictor in enumerate(predictors_of_ith_iteration):
-                predict = (predictor.predict_binned if is_binned
-                           else predictor.predict)
-                raw_predictions[:, k] += predict(X)
+                raw_predictions[:, k] += predictor.predict(X)
 
         return raw_predictions
 
@@ -465,8 +463,6 @@ class GradientBoostingRegressor(BaseGradientBoostingMachine, RegressorMixin):
         nodes to go from the root to the deepest leaf.
     min_samples_leaf : int, optional(default=20)
         The minimum number of samples per leaf.
-    l2_regularization : float, optional(default=0)
-        The L2 regularization parameter. Use 0 for no regularization.
     max_bins : int, optional(default=256)
         The maximum number of bins to use. Before training, each feature of
         the input array ``X`` is binned into at most ``max_bins`` bins, which
@@ -518,14 +514,14 @@ class GradientBoostingRegressor(BaseGradientBoostingMachine, RegressorMixin):
 
     def __init__(self, loss='least_squares', learning_rate=0.1,
                  max_iter=100, max_leaf_nodes=31, max_depth=None,
-                 min_samples_leaf=20, l2_regularization=0., max_bins=256,
+                 min_samples_leaf=20, w_l2_reg=0., b_l2_reg=0., max_bins=256,
                  scoring=None, validation_split=0.1, n_iter_no_change=5,
                  tol=1e-7, verbose=0, random_state=None):
         super(GradientBoostingRegressor, self).__init__(
             loss=loss, learning_rate=learning_rate, max_iter=max_iter,
             max_leaf_nodes=max_leaf_nodes, max_depth=max_depth,
             min_samples_leaf=min_samples_leaf,
-            l2_regularization=l2_regularization, max_bins=max_bins,
+            w_l2_reg=w_l2_reg, b_l2_reg=b_l2_reg, max_bins=max_bins,
             scoring=scoring, validation_split=validation_split,
             n_iter_no_change=n_iter_no_change, tol=tol, verbose=verbose,
             random_state=random_state)
@@ -587,8 +583,6 @@ class GradientBoostingClassifier(BaseGradientBoostingMachine, ClassifierMixin):
         nodes to go from the root to the deepest leaf.
     min_samples_leaf : int, optional(default=20)
         The minimum number of samples per leaf.
-    l2_regularization : float, optional(default=0)
-        The L2 regularization parameter. Use 0 for no regularization.
     max_bins : int, optional(default=256)
         The maximum number of bins to use. Before training, each feature of
         the input array ``X`` is binned into at most ``max_bins`` bins, which
@@ -638,14 +632,14 @@ class GradientBoostingClassifier(BaseGradientBoostingMachine, ClassifierMixin):
 
     def __init__(self, loss='auto', learning_rate=0.1, max_iter=100,
                  max_leaf_nodes=31, max_depth=None, min_samples_leaf=20,
-                 l2_regularization=0., max_bins=256, scoring=None,
+                 w_l2_reg=0., b_l2_reg=0., max_bins=256, scoring=None,
                  validation_split=0.1, n_iter_no_change=5, tol=1e-7,
                  verbose=0, random_state=None):
         super(GradientBoostingClassifier, self).__init__(
             loss=loss, learning_rate=learning_rate, max_iter=max_iter,
             max_leaf_nodes=max_leaf_nodes, max_depth=max_depth,
             min_samples_leaf=min_samples_leaf,
-            l2_regularization=l2_regularization, max_bins=max_bins,
+            w_l2_reg=w_l2_reg, b_l2_reg=b_l2_reg, max_bins=max_bins,
             scoring=scoring, validation_split=validation_split,
             n_iter_no_change=n_iter_no_change, tol=tol, verbose=verbose,
             random_state=random_state)
