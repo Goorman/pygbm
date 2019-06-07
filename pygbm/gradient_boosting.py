@@ -6,26 +6,27 @@ from abc import ABC, abstractmethod
 import numpy as np
 from time import time
 from sklearn.base import BaseEstimator, RegressorMixin, ClassifierMixin
-from sklearn.utils import check_X_y, check_random_state, check_array
+from sklearn.utils import check_random_state, check_array
 from sklearn.utils.validation import check_is_fitted
 from sklearn.utils.multiclass import check_classification_targets
 from sklearn.metrics import check_scoring
-from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
 
 #from pygbm.plain.grower import TreeGrower
 from pygbm.pwl.grower import TreeGrower
-from pygbm.binning import BinMapper
 from pygbm.loss import _LOSSES
+from pygbm.dataset import Dataset
+from typing import Union
 
 
 class BaseGradientBoostingMachine(BaseEstimator, ABC):
     """Base class for gradient boosting estimators."""
+    train_validation_subsample_size = 10000
 
     @abstractmethod
     def __init__(self, loss, learning_rate, max_iter, max_leaf_nodes,
                  max_depth, min_samples_leaf, w_l2_reg, b_l2_reg, max_bins,
-                 scoring, validation_split, n_iter_no_change, tol, verbose,
+                 scoring, n_iter_no_change, tol, verbose,
                  random_state):
         self.loss = loss
         self.learning_rate = learning_rate
@@ -37,13 +38,12 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
         self.b_l2_reg = b_l2_reg
         self.max_bins = max_bins
         self.n_iter_no_change = n_iter_no_change
-        self.validation_split = validation_split
         self.scoring = scoring
         self.tol = tol
         self.verbose = verbose
         self.random_state = random_state
 
-    def _validate_parameters(self, X):
+    def _validate_parameters(self):
         """Validate parameters passed to __init__.
 
         The parameters that are directly passed to the grower are checked in
@@ -64,117 +64,37 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
         if self.n_iter_no_change is not None and self.n_iter_no_change < 0:
             raise ValueError(f'n_iter_no_change={self.n_iter_no_change} '
                              f'must be positive.')
-        if self.validation_split is not None and self.validation_split <= 0:
-            raise ValueError(f'validation_split={self.validation_split} '
-                             f'must be strictly positive, or None.')
         if self.tol is not None and self.tol < 0:
             raise ValueError(f'tol={self.tol} '
                              f'must not be smaller than 0.')
-        if X.dtype == np.uint8:  # pre-binned data
-            max_bin_index = X.max()
-            if self.max_bins < max_bin_index + 1:
-                raise ValueError(
-                    f'max_bins is set to {self.max_bins} but the data is '
-                    f'pre-binned with {max_bin_index + 1} bins.'
-                )
 
-    def fit(self, X, y):
-        """Fit the gradient boosting model.
+    def fit(self, X: Union[np.array, Dataset], y: np.array = None):
 
-        Parameters
-        ----------
-        X : array-like, shape=(n_samples, n_features)
-            The input samples. If ``X.dtype == np.uint8``, the data is
-            assumed to be pre-binned and the prediction methods
-            (``predict``, ``predict_proba``) will only accept pre-binned
-            data as well.
+        if not isinstance(X, Dataset):
+            dataset = Dataset(X, y, max_bins=self.max_bins, verbose=self.verbose, random_state=self.random_state)
+        else:
+            dataset = X
 
-        y : array-like, shape=(n_samples,)
-            Target values.
+        y = self._encode_y(dataset.y)
 
-        Returns
-        -------
-        self : object
-        """
-
-        fit_start_time = time()
-        acc_find_split_time = 0.  # time spent finding the best splits
-        acc_apply_split_time = 0.  # time spent splitting nodes
-        # time spent predicting X for gradient and hessians update
-        acc_prediction_time = 0.
-        # TODO: add support for mixed-typed (numerical + categorical) data
-        # TODO: add support for missing data
-        X, y = check_X_y(X, y, dtype=[np.float32, np.float64, np.uint8])
-        y = self._encode_y(y)
-        if X.shape[0] == 1 or X.shape[1] == 1:
-            raise ValueError(
-                'Passing only one sample or one feature is not supported yet. '
-                'See numba issue #3569.'
-            )
         rng = check_random_state(self.random_state)
 
-        self._validate_parameters(X)
-        self.n_features_ = X.shape[1]  # used for validation in predict()
-
-        if X.dtype == np.uint8:  # data is pre-binned
-            if self.verbose:
-                print("X is pre-binned.")
-            X_binned = X
-            self.bin_mapper_ = None
-            numerical_thresholds = None
-            n_bins_per_feature = X.max(axis=0).astype(np.uint32)
-        else:
-            if self.verbose:
-                print(f"Binning {X.nbytes / 1e9:.3f} GB of data: ", end="",
-                      flush=True)
-            tic = time()
-            self.bin_mapper_ = BinMapper(max_bins=self.max_bins,
-                                         random_state=rng)
-            X_binned = self.bin_mapper_.fit_transform(X)
-            numerical_thresholds = self.bin_mapper_.numerical_thresholds_
-            n_bins_per_feature = self.bin_mapper_.n_bins_per_feature_
-            toc = time()
-
-            if self.verbose:
-                duration = toc - tic
-                throughput = X.nbytes / duration
-                print(f"{duration:.3f} s ({throughput / 1e6:.3f} MB/s)")
+        self._validate_parameters()
 
         self.loss_ = self._get_loss()
 
         do_early_stopping = (self.n_iter_no_change is not None and
                              self.n_iter_no_change > 0)
 
-        if do_early_stopping and self.validation_split is not None:
-            # stratify for classification
-            stratify = y if hasattr(self.loss_, 'predict_proba') else None
-
-            X_binned_train, X_binned_val, y_train, y_val, X_train, X_val = train_test_split(
-                X_binned, y, X, test_size=self.validation_split,
-                stratify=stratify, random_state=rng)
-            if X_binned_train.size == 0 or X_binned_val.size == 0:
-                raise ValueError(
-                    f'Not enough data (n_samples={X_binned.shape[0]}) to '
-                    f'perform early stopping with validation_split='
-                    f'{self.validation_split}. Use more training data or '
-                    f'adjust validation_split.'
-                )
-            # Predicting is faster of C-contiguous arrays, training is faster
-            # on Fortran arrays.
-            X_binned_val = np.ascontiguousarray(X_binned_val)
-            X_binned_train = np.asfortranarray(X_binned_train)
-            X_train = np.asfortranarray(X_train)
-            X_val = np.ascontiguousarray(X_val)
-        else:
-            X_binned_train, y_train, X_train = X_binned, y, X
-            X_binned_val, y_val, X_val = None, None, None
+        X_binned_train, y_train, X_train = dataset.X_binned, y, dataset.X
+        X_binned_val, y_val, X_val = None, None, None
 
         # Subsample the training set for score-based monitoring.
         if do_early_stopping:
-            subsample_size = 10000
+
             n_samples_train = X_binned_train.shape[0]
-            if n_samples_train > subsample_size:
-                indices = rng.choice(X_binned_train.shape[0], subsample_size)
+            if n_samples_train > self.train_validation_subsample_size:
+                indices = rng.choice(X_binned_train.shape[0], self.train_validation_subsample_size)
                 X_small_train = X_train[indices]
                 y_small_train = y_train[indices]
             else:
@@ -218,9 +138,15 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
             self.train_scores_.append(
                 self._get_scores(X_train, y_train))
 
-            if self.validation_split is not None:
-                self.validation_scores_.append(
-                    self._get_scores(X_val, y_val))
+# TODO: ADD VALIDATION
+#            if self.validation_split is not None:
+#                self.validation_scores_.append(
+#                    self._get_scores(X_val, y_val))
+
+        fit_start_time = time()
+        acc_find_split_time = 0.  # time spent finding the best splits
+        acc_apply_split_time = 0.  # time spent splitting nodes
+        acc_prediction_time = 0. # time spent predicting X for gradient and hessians update
 
         for iteration in range(self.max_iter):
 
@@ -234,7 +160,6 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
                                                      y_train, raw_predictions)
 
             predictors.append([])
-#            import pdb; pdb.set_trace()
             # Build `n_trees_per_iteration` trees.
             for k, (gradients_at_k, hessians_at_k) in enumerate(zip(
                     np.array_split(gradients, self.n_trees_per_iteration_),
@@ -247,7 +172,7 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
                 grower = TreeGrower(
                     X_binned_train, X_train, gradients_at_k, hessians_at_k,
                     max_bins=self.max_bins,
-                    n_bins_per_feature=n_bins_per_feature,
+                    n_bins_per_feature=dataset.n_bins_per_feature,
                     max_leaf_nodes=self.max_leaf_nodes,
                     max_depth=self.max_depth,
                     min_samples_leaf=self.min_samples_leaf,
@@ -256,13 +181,10 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
                     shrinkage=self.learning_rate)
                 grower.grow()
 
-#                import pdb;
-#                pdb.set_trace()
-
                 acc_apply_split_time += grower.total_apply_split_time
                 acc_find_split_time += grower.total_find_split_time
 
-                predictor = grower.make_predictor(numerical_thresholds)
+                predictor = grower.make_predictor(dataset.numerical_thresholds)
                 predictors[-1].append(predictor)
 
                 tic_pred = time()
@@ -316,11 +238,11 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
 
         self.train_scores_.append(
             self._get_scores(X_train, y_train))
-
-        if self.validation_split is not None:
-            self.validation_scores_.append(
-                self._get_scores(X_val, y_val))
-            return self._should_stop(self.validation_scores_)
+# TODO: ADD VALIDATION
+#        if self.validation_split is not None:
+#            self.validation_scores_.append(
+#                self._get_scores(X_val, y_val))
+#            return self._should_stop(self.validation_scores_)
 
         return self._should_stop(self.train_scores_)
 
@@ -382,16 +304,17 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
 
         if do_early_stopping:
             log_msg += f"{self.scoring} train: {self.train_scores_[-1]:.5f}, "
-            if self.validation_split is not None:
-                log_msg += (f"{self.scoring} val: "
-                            f"{self.validation_scores_[-1]:.5f}, ")
+# TODO: ADD VALIDATION
+#            if self.validation_split is not None:
+#                log_msg += (f"{self.scoring} val: "
+#                            f"{self.validation_scores_[-1]:.5f}, ")
 
         iteration_time = time() - iteration_start_time
         log_msg += f"in {iteration_time:0.3f}s"
 
         print(log_msg)
 
-    def _raw_predict(self, X):
+    def _raw_predict(self, X, n_trees=None):
         """Return the sum of the leaves values over all predictors.
 
         Parameters
@@ -420,8 +343,13 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
             dtype=self.baseline_prediction_.dtype
         )
         raw_predictions += self.baseline_prediction_
+
+        if n_trees is None or n_trees <= 0 or n_trees > len(self.predictors_) or not isinstance(n_trees, int):
+            predictors = self.predictors_
+        else:
+            predictors = self.predictors_[:n_trees]
         # Should we parallelize this?
-        for predictors_of_ith_iteration in self.predictors_:
+        for predictors_of_ith_iteration in predictors:
             for k, predictor in enumerate(predictors_of_ith_iteration):
                 raw_predictions[:, k] += predictor.predict(X)
 
@@ -474,10 +402,6 @@ class GradientBoostingRegressor(BaseGradientBoostingMachine, RegressorMixin):
         Scoring parameter to use for early stopping (see sklearn.metrics for
         available options). If None, early stopping is check w.r.t the loss
         value.
-    validation_split : int or float or None, optional(default=0.1)
-        Proportion (or absolute size) of training data to set aside as
-        validation data for early stopping. If None, early stopping is done on
-        the training data.
     n_iter_no_change : int or None, optional (default=5)
         Used to determine when to "early stop". The fitting process is
         stopped when none of the last ``n_iter_no_change`` scores are better
@@ -515,14 +439,14 @@ class GradientBoostingRegressor(BaseGradientBoostingMachine, RegressorMixin):
     def __init__(self, loss='least_squares', learning_rate=0.1,
                  max_iter=100, max_leaf_nodes=31, max_depth=None,
                  min_samples_leaf=20, w_l2_reg=0., b_l2_reg=0., max_bins=256,
-                 scoring=None, validation_split=0.1, n_iter_no_change=5,
+                 scoring=None, n_iter_no_change=5,
                  tol=1e-7, verbose=0, random_state=None):
         super(GradientBoostingRegressor, self).__init__(
             loss=loss, learning_rate=learning_rate, max_iter=max_iter,
             max_leaf_nodes=max_leaf_nodes, max_depth=max_depth,
             min_samples_leaf=min_samples_leaf,
             w_l2_reg=w_l2_reg, b_l2_reg=b_l2_reg, max_bins=max_bins,
-            scoring=scoring, validation_split=validation_split,
+            scoring=scoring,
             n_iter_no_change=n_iter_no_change, tol=tol, verbose=verbose,
             random_state=random_state)
 
@@ -593,10 +517,6 @@ class GradientBoostingClassifier(BaseGradientBoostingMachine, ClassifierMixin):
         Scoring parameter to use for early stopping (see sklearn.metrics for
         available options). If None, early stopping is check w.r.t the loss
         value.
-    validation_split : int or float or None, optional(default=0.1)
-        Proportion (or absolute size) of training data to set aside as
-        validation data for early stopping. If None, early stopping is done on
-        the training data.
     n_iter_no_change : int or None, optional (default=5)
         Used to determine when to "early stop". The fitting process is
         stopped when none of the last ``n_iter_no_change`` scores are better
@@ -633,14 +553,14 @@ class GradientBoostingClassifier(BaseGradientBoostingMachine, ClassifierMixin):
     def __init__(self, loss='auto', learning_rate=0.1, max_iter=100,
                  max_leaf_nodes=31, max_depth=None, min_samples_leaf=20,
                  w_l2_reg=0., b_l2_reg=0., max_bins=256, scoring=None,
-                 validation_split=0.1, n_iter_no_change=5, tol=1e-7,
+                 n_iter_no_change=5, tol=1e-7,
                  verbose=0, random_state=None):
         super(GradientBoostingClassifier, self).__init__(
             loss=loss, learning_rate=learning_rate, max_iter=max_iter,
             max_leaf_nodes=max_leaf_nodes, max_depth=max_depth,
             min_samples_leaf=min_samples_leaf,
             w_l2_reg=w_l2_reg, b_l2_reg=b_l2_reg, max_bins=max_bins,
-            scoring=scoring, validation_split=validation_split,
+            scoring=scoring,
             n_iter_no_change=n_iter_no_change, tol=tol, verbose=verbose,
             random_state=random_state)
 
@@ -663,7 +583,7 @@ class GradientBoostingClassifier(BaseGradientBoostingMachine, ClassifierMixin):
         encoded_classes = np.argmax(self.predict_proba(X), axis=1)
         return self.classes_[encoded_classes]
 
-    def predict_proba(self, X):
+    def predict_proba(self, X, n_trees=None):
         """Predict class probabilities for X.
 
         Parameters
@@ -678,7 +598,7 @@ class GradientBoostingClassifier(BaseGradientBoostingMachine, ClassifierMixin):
         p : array, shape (n_samples, n_classes)
             The class probabilities of the input samples.
         """
-        raw_predictions = self._raw_predict(X)
+        raw_predictions = self._raw_predict(X, n_trees)
         return self.loss_.predict_proba(raw_predictions)
 
     def _encode_y(self, y):

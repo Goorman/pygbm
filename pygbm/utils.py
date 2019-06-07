@@ -1,5 +1,6 @@
 """This module contains utility routines."""
 import numpy as np
+import time
 from numba import njit
 from numba import config as numba_config
 
@@ -85,3 +86,13 @@ def get_threads_chunks(total_size):
     ends = starts + sizes
 
     return starts, ends, n_threads
+
+
+class Timer:
+    def __enter__(self):
+        self.start = time.clock()
+        return self
+
+    def __exit__(self, *args):
+        self.end = time.clock()
+        self.interval = self.end - self.start
