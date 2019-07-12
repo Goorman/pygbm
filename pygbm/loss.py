@@ -65,9 +65,13 @@ class BaseLoss(ABC):
         shape = n_samples * prediction_dim
         gradients = np.empty(shape=shape, dtype=np.float32)
         if self.hessian_is_constant:
-            hessians = np.ones(shape=1, dtype=np.float32)
+            hessians = np.ones(shape=shape, dtype=np.float32)
         else:
             hessians = np.empty(shape=shape, dtype=np.float32)
+#        if self.hessian_is_constant:
+#            hessians = np.ones(shape=1, dtype=np.float32)
+#        else:
+#            hessians = np.empty(shape=shape, dtype=np.float32)
 
         return gradients, hessians
 

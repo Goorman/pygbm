@@ -72,12 +72,16 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
 
         if not isinstance(X, Dataset):
             dataset = Dataset(X, y, max_bins=self.max_bins, verbose=self.verbose, random_state=self.random_state)
+            self.n_features_ = dataset.shape[1]
         else:
             dataset = X
+            self.n_features_ = dataset.shape[1]
 
         y = self._encode_y(dataset.y)
 
         rng = check_random_state(self.random_state)
+
+
 
         self._validate_parameters()
 
@@ -450,7 +454,7 @@ class GradientBoostingRegressor(BaseGradientBoostingMachine, RegressorMixin):
             n_iter_no_change=n_iter_no_change, tol=tol, verbose=verbose,
             random_state=random_state)
 
-    def predict(self, X):
+    def predict(self, X, n_trees=None):
         """Predict values for X.
 
         Parameters
@@ -467,7 +471,7 @@ class GradientBoostingRegressor(BaseGradientBoostingMachine, RegressorMixin):
         """
         # Return raw predictions after converting shape
         # (n_samples, 1) to (n_samples,)
-        return self._raw_predict(X).ravel()
+        return self._raw_predict(X, n_trees).ravel()
 
     def _encode_y(self, y):
         # Just convert y to float32
