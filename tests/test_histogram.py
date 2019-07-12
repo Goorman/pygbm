@@ -2,12 +2,12 @@ import numpy as np
 import pytest
 from numpy.testing import assert_allclose
 from numpy.testing import assert_array_equal
-from pygbm.histogram import _build_histogram_naive
-from pygbm.histogram import _build_histogram
-from pygbm.histogram import _build_histogram_no_hessian
-from pygbm.histogram import _build_histogram_root_no_hessian
-from pygbm.histogram import _build_histogram_root
-from pygbm.histogram import _subtract_histograms
+from pygbm.plain.histogram import _build_histogram_naive
+from pygbm.plain.histogram import _build_histogram
+from pygbm.plain.histogram import _build_histogram_no_hessian
+from pygbm.plain.histogram import _build_histogram_root_no_hessian
+from pygbm.plain.histogram import _build_histogram_root
+from pygbm.plain.histogram import _subtract_histograms
 
 
 @pytest.mark.parametrize(

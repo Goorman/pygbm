@@ -2,7 +2,7 @@ import numpy as np
 from sklearn.datasets import make_classification
 import pytest
 from pygbm.binning import BinMapper
-from pygbm.grower import TreeGrower
+from pygbm.plain.grower import TreeGrower
 from pygbm import GradientBoostingRegressor
 from pygbm import GradientBoostingClassifier
 

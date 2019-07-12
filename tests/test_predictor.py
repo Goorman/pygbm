@@ -7,7 +7,7 @@ from sklearn.utils.testing import assert_raises_regex
 import pytest
 
 from pygbm.binning import BinMapper
-from pygbm.grower import TreeGrower
+from pygbm.plain.grower import TreeGrower
 
 
 @pytest.mark.parametrize('max_bins', [200, 256])

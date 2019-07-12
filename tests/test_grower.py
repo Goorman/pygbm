@@ -4,7 +4,7 @@ import pytest
 from pytest import approx
 from sklearn.utils.testing import assert_raises_regex
 
-from pygbm.grower import TreeGrower
+from pygbm.plain.grower import TreeGrower
 from pygbm.binning import BinMapper
 
 
