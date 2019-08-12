@@ -9,7 +9,7 @@ from typing import Tuple
 
 class Dataset():
     def __init__(self, X: np.array, y: np.array, max_bins: int=255, verbose: bool = False, random_state = None):
-        X, y = check_X_y(X, y, dtype=[np.float32, np.float64])
+        X, y = check_X_y(X, y, dtype=[np.float32], order='F')
         self._X = X
         self._y = y
         self.max_bins = max_bins

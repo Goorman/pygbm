@@ -164,20 +164,20 @@ class TreeGrower:
         The shrinkage parameter to apply to the leaves values, also known as
         learning rate.
     """
-    def __init__(self, X_binned, X, gradients, hessians, options: OptionSet):
+    def __init__(self, X_binned, X, gradients, hessians, n_bins_per_feature, options: OptionSet):
 
         self.max_leaf_nodes = options['max_leaf_nodes']
         self.max_depth = options['max_depth']
         self.min_samples_leaf = options['min_samples_leaf']
         self.min_gain_to_split = options['min_gain_to_split']
         self.max_bins = options['max_bins']
-        self.n_bins_per_feature = options['n_bins_per_feature']
+        self.n_bins_per_feature = n_bins_per_feature
         self.w_l2_reg = options['w_l2_reg']
         self.b_l2_reg = options['b_l2_reg']
         self.min_hessian_to_split = options['min_hessian_to_split']
         self.shrinkage = options['learning_rate']
 
-        self._validate_parameters(X_binned, self.max_leaf_nodes, self.max_depth,
+        self._validate_parameters(X_binned, X, self.max_leaf_nodes, self.max_depth,
                                   self.min_samples_leaf, self.min_gain_to_split,
                                   self.w_l2_reg, self.b_l2_reg, self.min_hessian_to_split)
 
@@ -201,7 +201,7 @@ class TreeGrower:
         self._initialize_root()
         self.n_nodes = 1
 
-    def _validate_parameters(self, X_binned, max_leaf_nodes, max_depth,
+    def _validate_parameters(self, X_binned, X, max_leaf_nodes, max_depth,
                              min_samples_leaf, min_gain_to_split,
                              w_l2_reg, b_l2_reg, min_hessian_to_split):
         """Validate parameters passed to __init__.
@@ -215,6 +215,10 @@ class TreeGrower:
         if not X_binned.flags.f_contiguous:
             raise ValueError(
                 "X_binned should be passed as Fortran contiguous "
+                "array for maximum efficiency.")
+        if not X.flags.f_contiguous:
+            raise ValueError(
+                "X should be passed as Fortran contiguous "
                 "array for maximum efficiency.")
         if max_leaf_nodes is not None and max_leaf_nodes < 1:
             raise ValueError(f'max_leaf_nodes={max_leaf_nodes} should not be'

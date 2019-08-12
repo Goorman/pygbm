@@ -163,13 +163,13 @@ class TreeGrower:
         The shrinkage parameter to apply to the leaves values, also known as
         learning rate.
     """
-    def __init__(self, X_binned, X, gradients, hessians, options:OptionSet):
+    def __init__(self, X_binned, X, gradients, hessians, n_bins_per_feature, options:OptionSet):
         self.max_leaf_nodes = options['max_leaf_nodes']
         self.max_depth = options['max_depth']
         self.min_samples_leaf = options['min_samples_leaf']
         self.min_gain_to_split = options['min_gain_to_split']
         self.max_bins = options['max_bins']
-        self.n_bins_per_feature = options['n_bins_per_feature']
+        self.n_bins_per_feature = n_bins_per_feature
         self.l2_regularization = options['b_l2_reg']
         self.min_hessian_to_split = options['min_hessian_to_split']
         self.shrinkage = options['learning_rate']
@@ -182,7 +182,7 @@ class TreeGrower:
             self.n_bins_per_feature = self.max_bins
 
         if isinstance(self.n_bins_per_feature, int):
-            n_bins_per_feature = np.array(
+            self.n_bins_per_feature = np.array(
                 [self.n_bins_per_feature] * X_binned.shape[1],
                 dtype=np.uint32)
 

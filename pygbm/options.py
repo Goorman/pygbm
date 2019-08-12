@@ -2,24 +2,6 @@ import abc
 from typing import Any, Tuple, Optional, List, Dict
 
 
-class OptionSet():
-    def __init__(self, options: Dict[str, Option]):
-        self.options = options
-
-    def update_from_estimator(self, estimator):
-        estimator_params = estimator.get_params()
-        for key in self.options:
-            param_value = estimator_params.get(key, None)
-            if param_value is not None:
-                self.options[key].set_value(param_value)
-
-    def __getitem__(self, item):
-        return self.options[item].value
-
-    def __setitem__(self, item, value):
-        self.options[item].set_value(value)
-
-
 class Option():
     def __init__(self):
         self.option_value = None
@@ -131,9 +113,30 @@ class StringOption(Option):
         if not isinstance(value, str):
             raise ValueError("value must be string")
         if self.available_options is not None and value not in self.available_options:
-            raise ValueError(f"value must be one of [{','.join(self.available_options)}]")
+            raise ValueError(f"value must be one of [{', '.join(self.available_options)}]")
         return value
 
     @property
     def default_value(self):
         return self._default_value
+
+
+class OptionSet():
+    def __init__(self, options: Dict[str, Option]):
+        self.options = options
+
+    def update_from_estimator(self, estimator):
+        estimator_params = estimator.get_params()
+        for key in self.options:
+            param_value = estimator_params.get(key, None)
+            if param_value is not None:
+                self[key] = param_value
+
+    def __getitem__(self, item):
+        return self.options[item].value
+
+    def __setitem__(self, item, value):
+        try:
+            self.options[item].set_value(value)
+        except ValueError as e:
+            raise ValueError(f'Incorrect value "{value}" for parameter "{item}": {str(e)}')

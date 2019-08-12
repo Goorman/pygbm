@@ -1,7 +1,7 @@
 """
 Gradient Boosting decision trees for classification and regression.
 """
-from abc import ABC, abstractmethod
+from abc import ABC, abstractmethod, abstractproperty
 
 import numpy as np
 from time import time
@@ -24,10 +24,10 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
     """Base class for gradient boosting estimators."""
     train_validation_subsample_size = 10000
 
-    @abstractmethod
     def __init__(self, loss=None, tree_type=None, learning_rate=None, max_iter=None, max_leaf_nodes=None,
                  max_depth=None, min_samples_leaf=None, w_l2_reg=None, b_l2_reg=None, max_bins=None,
-                 scoring=None, n_iter_no_change=None, tol=None, verbose=None, random_state=None):
+                 min_gain_to_split=None, min_hessian_to_split=None, scoring=None, n_iter_no_change=None,
+                 tol=None, verbose=None, random_state=None):
         self.loss = loss
         self.tree_type = tree_type
         self.learning_rate = learning_rate
@@ -39,13 +39,15 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
         self.b_l2_reg = b_l2_reg
         self.max_bins = max_bins
         self.n_iter_no_change = n_iter_no_change
+        self.min_gain_to_split = min_gain_to_split
+        self.min_hessian_to_split = min_hessian_to_split
         self.scoring = scoring
         self.tol = tol
         self.verbose = verbose
         self.random_state = random_state
 
-    @abstractmethod
     @property
+    @abstractmethod
     def parameter_dict(self) -> Dict[str, O.Option]:
         pass
 
@@ -60,7 +62,12 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
         rng = check_random_state(self.random_state)
 
         if not isinstance(X, Dataset):
-            dataset = Dataset(X, y, max_bins=self.max_bins, verbose=self.options['verbose'], random_state=self.options['random_state'])
+            dataset = Dataset(
+                X, y,
+                max_bins=self.options['max_bins'],
+                verbose=self.options['verbose'],
+                random_state=self.options['random_state']
+            )
             self.n_features_ = dataset.shape[1]
         else:
             dataset = X
@@ -164,7 +171,7 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
                     raise NotImplementedError
 
                 grower = tree_grower_cls(
-                    X_binned_train, X_train, gradients_at_k, hessians_at_k, self.options
+                    X_binned_train, X_train, gradients_at_k, hessians_at_k, dataset.n_bins_per_feature, self.options
                 )
                 grower.grow()
 
@@ -238,7 +245,7 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
         Return True (do early stopping) if the last n scores aren't better
         than the (n-1)th-to-last score, up to some tolerance.
         """
-        reference_position = self.n_iter_no_change + 1
+        reference_position = self.options['n_iter_no_change'] + 1
         if len(scores) < reference_position:
             return False
 
@@ -474,7 +481,7 @@ class GradientBoostingRegressor(BaseGradientBoostingMachine, RegressorMixin):
         return y
 
     def _get_loss(self):
-        return _LOSSES[self.loss]()
+        return _LOSSES[self.options['loss']]()
 
 
 class GradientBoostingClassifier(BaseGradientBoostingMachine, ClassifierMixin):
@@ -561,6 +568,8 @@ class GradientBoostingClassifier(BaseGradientBoostingMachine, ClassifierMixin):
             'b_l2_reg': O.PositiveFloatOption(default_value=1.0),
             'max_bins': O.PositiveIntegerOption(default_value=255, max_value=255),
             'n_iter_no_change': O.PositiveIntegerOption(default_value=5, none_value=-1),
+            'min_gain_to_split': O.PositiveFloatOption(default_value=1e-8),
+            'min_hessian_to_split': O.PositiveFloatOption(default_value=1e-8),
             'tol': O.PositiveFloatOption(default_value=1e-7),
             'random_state': O.PositiveIntegerOption(default_value=None),
             'verbose': O.BooleanOption(default_value=False),
@@ -625,10 +634,10 @@ class GradientBoostingClassifier(BaseGradientBoostingMachine, ClassifierMixin):
         return encoded_y
 
     def _get_loss(self):
-        if self.loss == 'auto':
+        if self.options['loss'] == 'auto':
             if self.n_trees_per_iteration_ == 1:
                 return _LOSSES['binary_crossentropy']()
             else:
                 return _LOSSES['categorical_crossentropy']()
 
-        return _LOSSES[self.loss]()
+        return _LOSSES[self.options['loss']]()
