@@ -13,6 +13,8 @@ from .splitting import (SplittingContext, split_indices, find_node_split,
                         find_node_split_subtraction)
 from .predictor import TreePredictor, PREDICTOR_RECORD_DTYPE
 
+from pygbm.options import OptionSet
+
 
 class TreeNode:
     """Tree Node class used in TreeGrower.
@@ -161,33 +163,34 @@ class TreeGrower:
         The shrinkage parameter to apply to the leaves values, also known as
         learning rate.
     """
-    def __init__(self, X_binned, gradients, hessians, max_leaf_nodes=None,
-                 max_depth=None, min_samples_leaf=20, min_gain_to_split=0.,
-                 max_bins=256, n_bins_per_feature=None, l2_regularization=0.,
-                 min_hessian_to_split=1e-3, shrinkage=1.):
+    def __init__(self, X_binned, X, gradients, hessians, options:OptionSet):
+        self.max_leaf_nodes = options['max_leaf_nodes']
+        self.max_depth = options['max_depth']
+        self.min_samples_leaf = options['min_samples_leaf']
+        self.min_gain_to_split = options['min_gain_to_split']
+        self.max_bins = options['max_bins']
+        self.n_bins_per_feature = options['n_bins_per_feature']
+        self.l2_regularization = options['b_l2_reg']
+        self.min_hessian_to_split = options['min_hessian_to_split']
+        self.shrinkage = options['learning_rate']
 
-        self._validate_parameters(X_binned, max_leaf_nodes, max_depth,
-                                  min_samples_leaf, min_gain_to_split,
-                                  l2_regularization, min_hessian_to_split)
+        self._validate_parameters(X_binned, self.max_leaf_nodes, self.max_depth,
+                                  self.min_samples_leaf, self.min_gain_to_split,
+                                  self.l2_regularization, self.min_hessian_to_split)
 
-        if n_bins_per_feature is None:
-            n_bins_per_feature = max_bins
+        if self.n_bins_per_feature is None:
+            self.n_bins_per_feature = self.max_bins
 
-        if isinstance(n_bins_per_feature, int):
+        if isinstance(self.n_bins_per_feature, int):
             n_bins_per_feature = np.array(
-                [n_bins_per_feature] * X_binned.shape[1],
+                [self.n_bins_per_feature] * X_binned.shape[1],
                 dtype=np.uint32)
 
         self.splitting_context = SplittingContext(
-            X_binned, max_bins, n_bins_per_feature, gradients,
-            hessians, l2_regularization, min_hessian_to_split,
-            min_samples_leaf, min_gain_to_split)
-        self.max_leaf_nodes = max_leaf_nodes
-        self.max_depth = max_depth
-        self.min_samples_leaf = min_samples_leaf
+            X_binned, self.max_bins, self.n_bins_per_feature, gradients,
+            hessians, self.l2_regularization, self.min_hessian_to_split,
+            self.min_samples_leaf, self.min_gain_to_split)
         self.X_binned = X_binned
-        self.min_gain_to_split = min_gain_to_split
-        self.shrinkage = shrinkage
         self.splittable_nodes = []
         self.finalized_leaves = []
         self.total_find_split_time = 0.  # time spent finding the best splits

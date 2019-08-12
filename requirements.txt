@@ -4,4 +4,3 @@ scipy
 scikit-learn>=0.20
 pytest  # for the tests
 joblib  # for the benchmark scripts
-lightgbm

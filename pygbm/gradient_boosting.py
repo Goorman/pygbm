@@ -12,11 +12,12 @@ from sklearn.utils.multiclass import check_classification_targets
 from sklearn.metrics import check_scoring
 from sklearn.preprocessing import LabelEncoder
 
-#from pygbm.plain.grower import TreeGrower
-from pygbm.pwl.grower import TreeGrower
+from pygbm.plain.grower import TreeGrower as PlainTreeGrower
+from pygbm.pwl.grower import TreeGrower as PWLTreeGrower
 from pygbm.loss import _LOSSES
 from pygbm.dataset import Dataset
-from typing import Union
+from pygbm import options as O
+from typing import Union, Dict
 
 
 class BaseGradientBoostingMachine(BaseEstimator, ABC):
@@ -24,11 +25,11 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
     train_validation_subsample_size = 10000
 
     @abstractmethod
-    def __init__(self, loss, learning_rate, max_iter, max_leaf_nodes,
-                 max_depth, min_samples_leaf, w_l2_reg, b_l2_reg, max_bins,
-                 scoring, n_iter_no_change, tol, verbose,
-                 random_state):
+    def __init__(self, loss=None, tree_type=None, learning_rate=None, max_iter=None, max_leaf_nodes=None,
+                 max_depth=None, min_samples_leaf=None, w_l2_reg=None, b_l2_reg=None, max_bins=None,
+                 scoring=None, n_iter_no_change=None, tol=None, verbose=None, random_state=None):
         self.loss = loss
+        self.tree_type = tree_type
         self.learning_rate = learning_rate
         self.max_iter = max_iter
         self.max_leaf_nodes = max_leaf_nodes
@@ -43,35 +44,23 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
         self.verbose = verbose
         self.random_state = random_state
 
+    @abstractmethod
+    @property
+    def parameter_dict(self) -> Dict[str, O.Option]:
+        pass
+
     def _validate_parameters(self):
-        """Validate parameters passed to __init__.
-
-        The parameters that are directly passed to the grower are checked in
-        TreeGrower."""
-
-        if self.loss not in self._VALID_LOSSES:
-            raise ValueError(
-                "Loss {} is not supported for {}. Accepted losses"
-                "are {}.".format(self.loss, self.__class__.__name__,
-                                 ', '.join(self._VALID_LOSSES)))
-
-        if self.learning_rate <= 0:
-            raise ValueError(f'learning_rate={self.learning_rate} must '
-                             f'be strictly positive')
-        if self.max_iter < 1:
-            raise ValueError(f'max_iter={self.max_iter} must '
-                             f'not be smaller than 1.')
-        if self.n_iter_no_change is not None and self.n_iter_no_change < 0:
-            raise ValueError(f'n_iter_no_change={self.n_iter_no_change} '
-                             f'must be positive.')
-        if self.tol is not None and self.tol < 0:
-            raise ValueError(f'tol={self.tol} '
-                             f'must not be smaller than 0.')
+        self.options = O.OptionSet(self.parameter_dict)
+        self.options.update_from_estimator(self)
 
     def fit(self, X: Union[np.array, Dataset], y: np.array = None):
 
+        self._validate_parameters()
+
+        rng = check_random_state(self.random_state)
+
         if not isinstance(X, Dataset):
-            dataset = Dataset(X, y, max_bins=self.max_bins, verbose=self.verbose, random_state=self.random_state)
+            dataset = Dataset(X, y, max_bins=self.max_bins, verbose=self.options['verbose'], random_state=self.options['random_state'])
             self.n_features_ = dataset.shape[1]
         else:
             dataset = X
@@ -79,16 +68,10 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
 
         y = self._encode_y(dataset.y)
 
-        rng = check_random_state(self.random_state)
-
-
-
-        self._validate_parameters()
-
         self.loss_ = self._get_loss()
 
-        do_early_stopping = (self.n_iter_no_change is not None and
-                             self.n_iter_no_change > 0)
+        do_early_stopping = (self.options['n_iter_no_change'] is not None and
+                             self.options['n_iter_no_change'] > 0)
 
         X_binned_train, y_train, X_train = dataset.X_binned, y, dataset.X
         X_binned_val, y_val, X_val = None, None, None
@@ -134,7 +117,7 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
 
         # scorer_ is a callable with signature (est, X, y) and calls
         # est.predict() or est.predict_proba() depending on its nature.
-        self.scorer_ = check_scoring(self, self.scoring)
+        self.scorer_ = check_scoring(self, self.options['scoring'])
         self.train_scores_ = []
         self.validation_scores_ = []
         if do_early_stopping:
@@ -152,11 +135,11 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
         acc_apply_split_time = 0.  # time spent splitting nodes
         acc_prediction_time = 0. # time spent predicting X for gradient and hessians update
 
-        for iteration in range(self.max_iter):
+        for iteration in range(self.options['max_iter']):
 
-            if self.verbose:
+            if self.options['verbose']:
                 iteration_start_time = time()
-                print(f"[{iteration + 1}/{self.max_iter}] ", end='',
+                print(f"[{iteration + 1}/{self.options['max_iter']}] ", end='',
                       flush=True)
 
             # Update gradients and hessians, inplace
@@ -173,16 +156,16 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
                 # n_trees_per_iteration is 1 and xxxx_at_k is equivalent to the
                 # whole array.
 
-                grower = TreeGrower(
-                    X_binned_train, X_train, gradients_at_k, hessians_at_k,
-                    max_bins=self.max_bins,
-                    n_bins_per_feature=dataset.n_bins_per_feature,
-                    max_leaf_nodes=self.max_leaf_nodes,
-                    max_depth=self.max_depth,
-                    min_samples_leaf=self.min_samples_leaf,
-                    w_l2_reg=self.w_l2_reg,
-                    b_l2_reg=self.b_l2_reg,
-                    shrinkage=self.learning_rate)
+                if self.options['tree_type'] == 'pwl':
+                    tree_grower_cls = PWLTreeGrower
+                elif self.options['tree_type'] == 'plain':
+                    tree_grower_cls = PlainTreeGrower
+                else:
+                    raise NotImplementedError
+
+                grower = tree_grower_cls(
+                    X_binned_train, X_train, gradients_at_k, hessians_at_k, self.options
+                )
                 grower.grow()
 
                 acc_apply_split_time += grower.total_apply_split_time
@@ -204,14 +187,14 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
                     X_small_train, y_small_train,
                     X_val, y_val)
 
-            if self.verbose:
+            if self.options['verbose']:
                 self._print_iteration_stats(iteration_start_time,
                                             do_early_stopping)
 
             if should_early_stop:
                 break
 
-        if self.verbose:
+        if self.options['verbose']:
             duration = time() - fit_start_time
             n_total_leaves = sum(
                 predictor.get_n_leaf_nodes()
@@ -364,7 +347,7 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
         pass
 
     @abstractmethod
-    def _encode_y(self, y=None):
+    def _encode_y(self, y):
         pass
 
     @property
@@ -438,21 +421,30 @@ class GradientBoostingRegressor(BaseGradientBoostingMachine, RegressorMixin):
     0.92...
     """
 
-    _VALID_LOSSES = ('least_squares',)
-
-    def __init__(self, loss='least_squares', learning_rate=0.1,
-                 max_iter=100, max_leaf_nodes=31, max_depth=None,
-                 min_samples_leaf=20, w_l2_reg=0., b_l2_reg=0., max_bins=256,
-                 scoring=None, n_iter_no_change=5,
-                 tol=1e-7, verbose=0, random_state=None):
-        super(GradientBoostingRegressor, self).__init__(
-            loss=loss, learning_rate=learning_rate, max_iter=max_iter,
-            max_leaf_nodes=max_leaf_nodes, max_depth=max_depth,
-            min_samples_leaf=min_samples_leaf,
-            w_l2_reg=w_l2_reg, b_l2_reg=b_l2_reg, max_bins=max_bins,
-            scoring=scoring,
-            n_iter_no_change=n_iter_no_change, tol=tol, verbose=verbose,
-            random_state=random_state)
+    def parameter_dict(self):
+        return {
+            'learning_rate': O.PositiveFloatOption(default_value=1.0),
+            'tree_type': O.StringOption(
+                default_value="pwl",
+                available_options=["plain", "pwl"]
+            ),
+            'max_iter': O.PositiveIntegerOption(default_value=100),
+            'max_leaf_nodes': O.PositiveIntegerOption(default_value=31, none_value=-1),
+            'max_depth': O.PositiveIntegerOption(default_value=10, none_value=-1),
+            'min_samples_leaf': O.PositiveIntegerOption(default_value=20),
+            'w_l2_reg': O.PositiveFloatOption(default_value=1.0),
+            'b_l2_reg': O.PositiveFloatOption(default_value=1.0),
+            'max_bins': O.PositiveIntegerOption(default_value=255, max_value=255),
+            'n_iter_no_change': O.PositiveIntegerOption(default_value=5, none_value=-1),
+            'tol': O.PositiveFloatOption(default_value=1e-7),
+            'random_state': O.PositiveIntegerOption(default_value=None),
+            'verbose': O.BooleanOption(default_value=False),
+            'scoring': O.StringOption(default_value=None),
+            'loss': O.StringOption(
+                default_value="least_squares",
+                available_options=['least_squares']
+            )
+        }
 
     def predict(self, X, n_trees=None):
         """Predict values for X.
@@ -463,6 +455,8 @@ class GradientBoostingRegressor(BaseGradientBoostingMachine, RegressorMixin):
             The input samples. If ``X.dtype == np.uint8``, the data is assumed
             to be pre-binned and the estimator must have been fitted with
             pre-binned data.
+        n_trees : Optional[int]
+            Number of decision trees to use for prediction.
 
         Returns
         -------
@@ -551,22 +545,32 @@ class GradientBoostingClassifier(BaseGradientBoostingMachine, ClassifierMixin):
     0.97...
     """
 
-    _VALID_LOSSES = ('binary_crossentropy', 'categorical_crossentropy',
-                     'auto')
-
-    def __init__(self, loss='auto', learning_rate=0.1, max_iter=100,
-                 max_leaf_nodes=31, max_depth=None, min_samples_leaf=20,
-                 w_l2_reg=0., b_l2_reg=0., max_bins=256, scoring=None,
-                 n_iter_no_change=5, tol=1e-7,
-                 verbose=0, random_state=None):
-        super(GradientBoostingClassifier, self).__init__(
-            loss=loss, learning_rate=learning_rate, max_iter=max_iter,
-            max_leaf_nodes=max_leaf_nodes, max_depth=max_depth,
-            min_samples_leaf=min_samples_leaf,
-            w_l2_reg=w_l2_reg, b_l2_reg=b_l2_reg, max_bins=max_bins,
-            scoring=scoring,
-            n_iter_no_change=n_iter_no_change, tol=tol, verbose=verbose,
-            random_state=random_state)
+    @property
+    def parameter_dict(self):
+        return {
+            'learning_rate': O.PositiveFloatOption(default_value=1.0),
+            'tree_type': O.StringOption(
+                default_value="pwl",
+                available_options=["plain", "pwl"]
+            ),
+            'max_iter': O.PositiveIntegerOption(default_value=100),
+            'max_leaf_nodes': O.PositiveIntegerOption(default_value=31, none_value=-1),
+            'max_depth': O.PositiveIntegerOption(default_value=10, none_value=-1),
+            'min_samples_leaf': O.PositiveIntegerOption(default_value=20),
+            'w_l2_reg': O.PositiveFloatOption(default_value=1.0),
+            'b_l2_reg': O.PositiveFloatOption(default_value=1.0),
+            'max_bins': O.PositiveIntegerOption(default_value=255, max_value=255),
+            'n_iter_no_change': O.PositiveIntegerOption(default_value=5, none_value=-1),
+            'tol': O.PositiveFloatOption(default_value=1e-7),
+            'random_state': O.PositiveIntegerOption(default_value=None),
+            'verbose': O.BooleanOption(default_value=False),
+            'scoring': O.StringOption(default_value=None),
+            'loss': O.StringOption(
+                default_value="auto",
+                available_options=[
+                    'binary_crossentropy', 'categorical_crossentropy', 'auto']
+            )
+        }
 
     def predict(self, X):
         """Predict classes for X.

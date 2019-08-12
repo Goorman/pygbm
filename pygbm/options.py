@@ -1,9 +1,28 @@
 import abc
-from typing import Any, Tuple, Optional, List
+from typing import Any, Tuple, Optional, List, Dict
+
+
+class OptionSet():
+    def __init__(self, options: Dict[str, Option]):
+        self.options = options
+
+    def update_from_estimator(self, estimator):
+        estimator_params = estimator.get_params()
+        for key in self.options:
+            param_value = estimator_params.get(key, None)
+            if param_value is not None:
+                self.options[key].set_value(param_value)
+
+    def __getitem__(self, item):
+        return self.options[item].value
+
+    def __setitem__(self, item, value):
+        self.options[item].set_value(value)
 
 
 class Option():
     def __init__(self):
+        self.option_value = None
         try:
             self.set_value(self.default_value)
         except ValueError as e:
@@ -27,15 +46,17 @@ class Option():
 
 
 class PositiveFloatOption(Option):
-    def __init__(self, default_value, max_value=None, nullable=False):
+    def __init__(self, default_value, max_value=None, none_value=None):
         self._default_value = default_value
         self.max_value = max_value
-        self.nullable = nullable
+        self.none_value = none_value
         super().__init__()
 
     def _process_value(self, value):
-        if value is None and self.nullable:
-            return value
+        if value is None:
+            return self.default_value
+        if self.none_value is not None and self.none_value == value:
+            return None
         if not isinstance(value, float):
             raise ValueError("value must be float")
         if value <= 0:
@@ -50,15 +71,17 @@ class PositiveFloatOption(Option):
 
 
 class PositiveIntegerOption(Option):
-    def __init__(self, default_value, max_value=None, nullable=False):
+    def __init__(self, default_value, max_value=None, none_value=None):
         self._default_value = default_value
         self.max_value = max_value
-        self.nullable = nullable
+        self.none_value = none_value
         super().__init__()
 
     def _process_value(self, value):
-        if value is None and self.nullable:
-            return value
+        if value is None:
+            return self.default_value
+        if self.none_value is not None and self.none_value == value:
+            return None
         if not isinstance(value, int):
             raise ValueError("value must be integer")
         if value <= 0:
@@ -73,15 +96,17 @@ class PositiveIntegerOption(Option):
 
 
 class BooleanOption(Option):
-    def __init__(self, default_value, nullable=False):
+    def __init__(self, default_value, none_value=None):
         assert isinstance(default_value, bool)
         self._default_value = default_value
-        self.nullable = nullable
+        self.none_value = none_value
         super().__init__()
 
     def _process_value(self, value):
-        if value is None and self.nullable:
-            return value
+        if value is None:
+            return self.default_value
+        if self.none_value is not None and self.none_value == value:
+            return None
         if not isinstance(value, bool):
             raise ValueError("value must be boolean")
         return value
@@ -92,15 +117,17 @@ class BooleanOption(Option):
 
 
 class StringOption(Option):
-    def __init__(self, default_value, available_options: Optional[List[str]]=None, nullable=False):
+    def __init__(self, default_value, available_options: Optional[List[str]]=None, none_value=None):
         self._default_value = default_value
         self.available_options = available_options
-        self.nullable = nullable
+        self.none_value=none_value
         super().__init__()
 
     def _process_value(self, value: Any):
-        if value is None and self.nullable:
-            return value
+        if value is None:
+            return self.default_value
+        if self.none_value is not None and self.none_value == value:
+            return None
         if not isinstance(value, str):
             raise ValueError("value must be string")
         if self.available_options is not None and value not in self.available_options:
