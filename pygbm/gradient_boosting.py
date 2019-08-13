@@ -17,7 +17,7 @@ from pygbm.pwl.grower import TreeGrower as PWLTreeGrower
 from pygbm.loss import _LOSSES
 from pygbm.dataset import Dataset
 from pygbm import options as O
-from typing import Union, Dict
+from typing import Union, Dict, Tuple
 
 
 class BaseGradientBoostingMachine(BaseEstimator, ABC):
@@ -55,7 +55,7 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
         self.options = O.OptionSet(self.parameter_dict)
         self.options.update_from_estimator(self)
 
-    def fit(self, X: Union[np.array, Dataset], y: np.array = None):
+    def fit(self, X: Union[np.array, Dataset], y: np.array = None, eval_set: Tuple[np.array, np.array]=None):
 
         self._validate_parameters()
 
@@ -73,6 +73,14 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
             dataset = X
             self.n_features_ = dataset.shape[1]
 
+        if eval_set is not None:
+            self.do_validation = True
+            X_val, y_val = eval_set[0], eval_set[1]
+            X_val = np.ascontiguousarray(X_val)
+        else:
+            self.do_validation = False
+            X_val, y_val = None, None
+
         y = self._encode_y(dataset.y)
 
         self.loss_ = self._get_loss()
@@ -81,11 +89,9 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
                              self.options['n_iter_no_change'] > 0)
 
         X_binned_train, y_train, X_train = dataset.X_binned, y, dataset.X
-        X_binned_val, y_val, X_val = None, None, None
 
         # Subsample the training set for score-based monitoring.
         if do_early_stopping:
-
             n_samples_train = X_binned_train.shape[0]
             if n_samples_train > self.train_validation_subsample_size:
                 indices = rng.choice(X_binned_train.shape[0], self.train_validation_subsample_size)
@@ -132,10 +138,9 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
             self.train_scores_.append(
                 self._get_scores(X_train, y_train))
 
-# TODO: ADD VALIDATION
-#            if self.validation_split is not None:
-#                self.validation_scores_.append(
-#                    self._get_scores(X_val, y_val))
+            if self.do_validation:
+                self.validation_scores_.append(
+                    self._get_scores(X_val, y_val))
 
         fit_start_time = time()
         acc_find_split_time = 0.  # time spent finding the best splits
@@ -164,13 +169,13 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
                 # whole array.
 
                 if self.options['tree_type'] == 'pwl':
-                    tree_grower_cls = PWLTreeGrower
+                    tree_grower = PWLTreeGrower
                 elif self.options['tree_type'] == 'plain':
-                    tree_grower_cls = PlainTreeGrower
+                    tree_grower = PlainTreeGrower
                 else:
                     raise NotImplementedError
 
-                grower = tree_grower_cls(
+                grower = tree_grower(
                     X_binned_train, X_train, gradients_at_k, hessians_at_k, dataset.n_bins_per_feature, self.options
                 )
                 grower.grow()
@@ -232,11 +237,11 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
 
         self.train_scores_.append(
             self._get_scores(X_train, y_train))
-# TODO: ADD VALIDATION
-#        if self.validation_split is not None:
-#            self.validation_scores_.append(
-#                self._get_scores(X_val, y_val))
-#            return self._should_stop(self.validation_scores_)
+
+        if self.do_validation:
+            self.validation_scores_.append(
+                self._get_scores(X_val, y_val))
+            return self._should_stop(self.validation_scores_)
 
         return self._should_stop(self.train_scores_)
 
@@ -298,10 +303,9 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
 
         if do_early_stopping:
             log_msg += f"{self.scoring} train: {self.train_scores_[-1]:.5f}, "
-# TODO: ADD VALIDATION
-#            if self.validation_split is not None:
-#                log_msg += (f"{self.scoring} val: "
-#                            f"{self.validation_scores_[-1]:.5f}, ")
+            if self.do_validation:
+                log_msg += (f"{self.scoring} val: "
+                            f"{self.validation_scores_[-1]:.5f}, ")
 
         iteration_time = time() - iteration_start_time
         log_msg += f"in {iteration_time:0.3f}s"
