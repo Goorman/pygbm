@@ -81,7 +81,7 @@ def test_derivatives(loss, x0, data, minimum):
     def fprime2(x):
         return np.mean([get_hessians(np.array([y_true], dtype=np.float32), x) for y_true in data])
 
-    optimum, optimal_loss = newton(func, fprime, fprime2, x0=x0 )
+    optimum, optimal_loss = newton(func, fprime, fprime2, x0=x0)
     assert np.allclose(loss.inverse_link_function(optimum), minimum)
     assert np.allclose(fprime(optimum), 0)
 

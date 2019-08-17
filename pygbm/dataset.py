@@ -30,8 +30,6 @@ class Dataset():
             self.bin_mapper_ = BinMapper(max_bins=self.max_bins,
                                         random_state=random_state)
             self._X_binned = self.bin_mapper_.fit_transform(self._X)
-            self.numerical_thresholds_ = self.bin_mapper_.numerical_thresholds_
-            self.n_bins_per_feature_ = self.bin_mapper_.n_bins_per_feature_
 
         if self.verbose:
             duration = binning_timer.interval
@@ -56,8 +54,8 @@ class Dataset():
 
     @property
     def numerical_thresholds(self):
-        return self.numerical_thresholds_
+        return self.bin_mapper_.numerical_thresholds_
 
     @property
     def n_bins_per_feature(self):
-        return self.n_bins_per_feature_
+        return self.bin_mapper_.n_bins_per_feature_
