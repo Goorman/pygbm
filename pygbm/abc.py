@@ -19,7 +19,7 @@ class BaseTreeGrower():
     def __init__(self):
         pass
 
-    def grow(self) -> None:
+    def grow(self, dataset, gradients, hessians, options) -> None:
         pass
 
     def make_predictor(self, numerical_thresholds) -> BaseTreePredictor:

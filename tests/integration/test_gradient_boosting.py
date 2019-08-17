@@ -6,6 +6,7 @@ from numpy.testing import assert_allclose
 import pytest
 from sklearn.utils.testing import assert_raises_regex
 from sklearn.datasets import make_classification, make_regression
+from sklearn.model_selection import train_test_split
 
 from pygbm import GradientBoostingClassifier
 from pygbm import GradientBoostingRegressor
@@ -24,45 +25,45 @@ def test_init_parameters_validation(GradientBoosting, X, y):
 
     assert_raises_regex(
         ValueError,
-        "Loss blah is not supported for",
+        'Incorrect value "blah" for parameter "loss": value must be one of \[binary_crossentropy, categorical_crossentropy, auto\]',
         GradientBoosting(loss='blah').fit, X, y
     )
 
     for learning_rate in (-1, 0):
         assert_raises_regex(
             ValueError,
-            f"learning_rate={learning_rate} must be strictly positive",
+            f'Incorrect value "{learning_rate}" for parameter "learning_rate": value must be float',
             GradientBoosting(learning_rate=learning_rate).fit, X, y
         )
 
     assert_raises_regex(
         ValueError,
-        f"max_iter=0 must not be smaller than 1",
+        'Incorrect value "0" for parameter "max_iter": value must be positive',
         GradientBoosting(max_iter=0).fit, X, y
     )
 
     assert_raises_regex(
         ValueError,
-        f"max_leaf_nodes=0 should not be smaller than 1",
+        'Incorrect value "0" for parameter "max_leaf_nodes": value must be positive',
         GradientBoosting(max_leaf_nodes=0).fit, X, y
     )
 
     assert_raises_regex(
         ValueError,
-        f"max_depth=0 should not be smaller than 1",
+        'Incorrect value "0" for parameter "max_depth": value must be positive',
         GradientBoosting(max_depth=0).fit, X, y
     )
 
     assert_raises_regex(
         ValueError,
-        f"min_samples_leaf=0 should not be smaller than 1",
+        'Incorrect value "0" for parameter "min_samples_leaf": value must be positive',
         GradientBoosting(min_samples_leaf=0).fit, X, y
     )
 
     assert_raises_regex(
         ValueError,
-        f"l2_regularization=-1 must be positive",
-        GradientBoosting(l2_regularization=-1).fit, X, y
+        'Incorrect value "-1" for parameter "b_l2_reg": value must be float',
+        GradientBoosting(b_l2_reg=-1).fit, X, y
     )
 
     for max_bins in (1, 257):
@@ -74,22 +75,9 @@ def test_init_parameters_validation(GradientBoosting, X, y):
 
     assert_raises_regex(
         ValueError,
-        f"max_bins is set to 4 but the data is pre-binned with 256 bins",
-        GradientBoosting(max_bins=4).fit, X.astype(np.uint8), y
-    )
-
-    assert_raises_regex(
-        ValueError,
         f"n_iter_no_change=-1 must be positive",
         GradientBoosting(n_iter_no_change=-1).fit, X, y
     )
-
-    for validation_split in (-1, 0):
-        assert_raises_regex(
-            ValueError,
-            f"validation_split={validation_split} must be strictly positive",
-            GradientBoosting(validation_split=validation_split).fit, X, y
-        )
 
     assert_raises_regex(
         ValueError,
@@ -127,15 +115,20 @@ def test_early_stopping_regression(scoring, validation_split,
     max_iter = 500
 
     X, y = make_regression(random_state=0)
+    if validation_split is not None:
+        X, X_test, y, y_test = train_test_split(
+            X, y, test_size=validation_split, random_state=42)
+        eval_set = (X_test, y_test)
+    else:
+        eval_set = None
 
     gb = GradientBoostingRegressor(verbose=1,  # just for coverage
                                    scoring=scoring,
                                    tol=tol,
-                                   validation_split=validation_split,
                                    max_iter=max_iter,
                                    n_iter_no_change=n_iter_no_change,
                                    random_state=0)
-    gb.fit(X, y)
+    gb.fit(X, y, eval_set=eval_set)
 
     if n_iter_no_change is not None:
         assert n_iter_no_change <= gb.n_iter_ < max_iter
@@ -163,15 +156,20 @@ def test_early_stopping_classification(data, scoring, validation_split,
     max_iter = 500
 
     X, y = data
+    if validation_split is not None:
+        X, X_test, y, y_test = train_test_split(
+            X, y, test_size=validation_split, random_state=42)
+        eval_set = (X_test, y_test)
+    else:
+        eval_set = None
 
     gb = GradientBoostingClassifier(verbose=1,  # just for coverage
                                     scoring=scoring,
                                     tol=tol,
-                                    validation_split=validation_split,
                                     max_iter=max_iter,
                                     n_iter_no_change=n_iter_no_change,
                                     random_state=0)
-    gb.fit(X, y)
+    gb.fit(X, y, eval_set=eval_set)
 
     if n_iter_no_change is not None:
         assert n_iter_no_change <= gb.n_iter_ < max_iter

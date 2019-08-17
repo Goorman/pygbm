@@ -163,18 +163,18 @@ class TreeGrower:
         The shrinkage parameter to apply to the leaves values, also known as
         learning rate.
     """
-    def __init__(self, X_binned, X, gradients, hessians, n_bins_per_feature, options:OptionSet):
+    def __init__(self, dataset, gradients, hessians, options:OptionSet):
         self.max_leaf_nodes = options['max_leaf_nodes']
         self.max_depth = options['max_depth']
         self.min_samples_leaf = options['min_samples_leaf']
         self.min_gain_to_split = options['min_gain_to_split']
         self.max_bins = options['max_bins']
-        self.n_bins_per_feature = n_bins_per_feature
+        self.n_bins_per_feature = dataset.n_bins_per_feature
         self.l2_regularization = options['b_l2_reg']
         self.min_hessian_to_split = options['min_hessian_to_split']
         self.shrinkage = options['learning_rate']
 
-        self._validate_parameters(X_binned, self.max_leaf_nodes, self.max_depth,
+        self._validate_parameters(dataset.X_binned, self.max_leaf_nodes, self.max_depth,
                                   self.min_samples_leaf, self.min_gain_to_split,
                                   self.l2_regularization, self.min_hessian_to_split)
 
@@ -183,14 +183,14 @@ class TreeGrower:
 
         if isinstance(self.n_bins_per_feature, int):
             self.n_bins_per_feature = np.array(
-                [self.n_bins_per_feature] * X_binned.shape[1],
+                [self.n_bins_per_feature] * dataset.X_binned.shape[1],
                 dtype=np.uint32)
 
         self.splitting_context = SplittingContext(
-            X_binned, self.max_bins, self.n_bins_per_feature, gradients,
+            dataset.X_binned, self.max_bins, self.n_bins_per_feature, gradients,
             hessians, self.l2_regularization, self.min_hessian_to_split,
             self.min_samples_leaf, self.min_gain_to_split)
-        self.X_binned = X_binned
+        self.X_binned = dataset.X_binned
         self.splittable_nodes = []
         self.finalized_leaves = []
         self.total_find_split_time = 0.  # time spent finding the best splits

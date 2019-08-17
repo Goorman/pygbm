@@ -1,7 +1,7 @@
 """
 Gradient Boosting decision trees for classification and regression.
 """
-from abc import ABC, abstractmethod, abstractproperty
+from abc import ABC, abstractmethod
 
 import numpy as np
 from time import time
@@ -176,7 +176,7 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
                     raise NotImplementedError
 
                 grower = tree_grower(
-                    X_binned_train, X_train, gradients_at_k, hessians_at_k, dataset.n_bins_per_feature, self.options
+                     dataset, gradients_at_k, hessians_at_k, self.options
                 )
                 grower.grow()
 
@@ -432,6 +432,7 @@ class GradientBoostingRegressor(BaseGradientBoostingMachine, RegressorMixin):
     0.92...
     """
 
+    @property
     def parameter_dict(self):
         return {
             'learning_rate': O.PositiveFloatOption(default_value=1.0),
