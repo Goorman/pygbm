@@ -52,8 +52,8 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
         pass
 
     def _validate_parameters(self):
-        self.options = O.OptionSet(self.parameter_dict)
-        self.options.update_from_estimator(self)
+        self._options = O.OptionSet(self.parameter_dict)
+        self._options.update_from_estimator(self)
 
     def fit(self, X: Union[np.array, Dataset], y: np.array = None, eval_set: Tuple[np.array, np.array]=None):
 
@@ -64,9 +64,9 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
         if not isinstance(X, Dataset):
             dataset = Dataset(
                 X, y,
-                max_bins=self.options['max_bins'],
-                verbose=self.options['verbose'],
-                random_state=self.options['random_state']
+                max_bins=self._options['max_bins'],
+                verbose=self._options['verbose'],
+                random_state=self._options['random_state']
             )
             self.n_features_ = dataset.shape[1]
         else:
@@ -74,19 +74,19 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
             self.n_features_ = dataset.shape[1]
 
         if eval_set is not None:
-            self.do_validation = True
+            self._do_validation = True
             X_val, y_val = eval_set[0], eval_set[1]
             X_val = np.ascontiguousarray(X_val)
         else:
-            self.do_validation = False
+            self._do_validation = False
             X_val, y_val = None, None
 
         y = self._encode_y(dataset.y)
 
         self.loss_ = self._get_loss()
 
-        do_early_stopping = (self.options['n_iter_no_change'] is not None and
-                             self.options['n_iter_no_change'] > 0)
+        do_early_stopping = (self._options['n_iter_no_change'] is not None and
+                             self._options['n_iter_no_change'] > 0)
 
         X_binned_train, y_train, X_train = dataset.X_binned, y, dataset.X
 
@@ -130,7 +130,7 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
 
         # scorer_ is a callable with signature (est, X, y) and calls
         # est.predict() or est.predict_proba() depending on its nature.
-        self.scorer_ = check_scoring(self, self.options['scoring'])
+        self.scorer_ = check_scoring(self, self._options['scoring'])
         self.train_scores_ = []
         self.validation_scores_ = []
         if do_early_stopping:
@@ -138,7 +138,7 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
             self.train_scores_.append(
                 self._get_scores(X_train, y_train))
 
-            if self.do_validation:
+            if self._do_validation:
                 self.validation_scores_.append(
                     self._get_scores(X_val, y_val))
 
@@ -147,11 +147,11 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
         acc_apply_split_time = 0.  # time spent splitting nodes
         acc_prediction_time = 0. # time spent predicting X for gradient and hessians update
 
-        for iteration in range(self.options['max_iter']):
+        for iteration in range(self._options['max_iter']):
 
-            if self.options['verbose']:
+            if self._options['verbose']:
                 iteration_start_time = time()
-                print(f"[{iteration + 1}/{self.options['max_iter']}] ", end='',
+                print(f"[{iteration + 1}/{self._options['max_iter']}] ", end='',
                       flush=True)
 
             # Update gradients and hessians, inplace
@@ -168,22 +168,22 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
                 # n_trees_per_iteration is 1 and xxxx_at_k is equivalent to the
                 # whole array.
 
-                if self.options['tree_type'] == 'pwl':
+                if self._options['tree_type'] == 'pwl':
                     tree_grower = PWLTreeGrower
-                elif self.options['tree_type'] == 'plain':
+                elif self._options['tree_type'] == 'plain':
                     tree_grower = PlainTreeGrower
                 else:
                     raise NotImplementedError
 
                 grower = tree_grower(
-                     dataset, gradients_at_k, hessians_at_k, self.options
+                     dataset, gradients_at_k, hessians_at_k, self._options
                 )
                 grower.grow()
 
                 acc_apply_split_time += grower.total_apply_split_time
                 acc_find_split_time += grower.total_find_split_time
 
-                predictor = grower.make_predictor(dataset.numerical_thresholds)
+                predictor = grower.make_predictor()
                 predictors[-1].append(predictor)
 
                 tic_pred = time()
@@ -199,14 +199,14 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
                     X_small_train, y_small_train,
                     X_val, y_val)
 
-            if self.options['verbose']:
+            if self._options['verbose']:
                 self._print_iteration_stats(iteration_start_time,
                                             do_early_stopping)
 
             if should_early_stop:
                 break
 
-        if self.options['verbose']:
+        if self._options['verbose']:
             duration = time() - fit_start_time
             n_total_leaves = sum(
                 predictor.get_n_leaf_nodes()
@@ -238,7 +238,7 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
         self.train_scores_.append(
             self._get_scores(X_train, y_train))
 
-        if self.do_validation:
+        if self._do_validation:
             self.validation_scores_.append(
                 self._get_scores(X_val, y_val))
             return self._should_stop(self.validation_scores_)
@@ -250,7 +250,7 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
         Return True (do early stopping) if the last n scores aren't better
         than the (n-1)th-to-last score, up to some tolerance.
         """
-        reference_position = self.options['n_iter_no_change'] + 1
+        reference_position = self._options['n_iter_no_change'] + 1
         if len(scores) < reference_position:
             return False
 
@@ -303,7 +303,7 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
 
         if do_early_stopping:
             log_msg += f"{self.scoring} train: {self.train_scores_[-1]:.5f}, "
-            if self.do_validation:
+            if self._do_validation:
                 log_msg += (f"{self.scoring} val: "
                             f"{self.validation_scores_[-1]:.5f}, ")
 
@@ -446,10 +446,12 @@ class GradientBoostingRegressor(BaseGradientBoostingMachine, RegressorMixin):
             'min_samples_leaf': O.PositiveIntegerOption(default_value=20),
             'w_l2_reg': O.PositiveFloatOption(default_value=1.0),
             'b_l2_reg': O.PositiveFloatOption(default_value=1.0),
-            'max_bins': O.PositiveIntegerOption(default_value=255, max_value=255),
+            'max_bins': O.IntegerOption(default_value=255, min_value=2, max_value=256),
             'n_iter_no_change': O.PositiveIntegerOption(default_value=5, none_value=-1),
+            'min_gain_to_split': O.PositiveFloatOption(default_value=1e-8),
+            'min_hessian_to_split': O.PositiveFloatOption(default_value=1e-8),
             'tol': O.PositiveFloatOption(default_value=1e-7),
-            'random_state': O.PositiveIntegerOption(default_value=None),
+            'random_state': O.IntegerOption(default_value=None),
             'verbose': O.BooleanOption(default_value=False),
             'scoring': O.StringOption(default_value=None),
             'loss': O.StringOption(
@@ -486,7 +488,7 @@ class GradientBoostingRegressor(BaseGradientBoostingMachine, RegressorMixin):
         return y
 
     def _get_loss(self):
-        return _LOSSES[self.options['loss']]()
+        return _LOSSES[self._options['loss']]()
 
 
 class GradientBoostingClassifier(BaseGradientBoostingMachine, ClassifierMixin):
@@ -571,12 +573,12 @@ class GradientBoostingClassifier(BaseGradientBoostingMachine, ClassifierMixin):
             'min_samples_leaf': O.PositiveIntegerOption(default_value=20),
             'w_l2_reg': O.PositiveFloatOption(default_value=1.0),
             'b_l2_reg': O.PositiveFloatOption(default_value=1.0),
-            'max_bins': O.PositiveIntegerOption(default_value=255, max_value=255),
+            'max_bins': O.IntegerOption(default_value=255, min_value=2, max_value=256),
             'n_iter_no_change': O.PositiveIntegerOption(default_value=5, none_value=-1),
             'min_gain_to_split': O.PositiveFloatOption(default_value=1e-8),
             'min_hessian_to_split': O.PositiveFloatOption(default_value=1e-8),
             'tol': O.PositiveFloatOption(default_value=1e-7),
-            'random_state': O.PositiveIntegerOption(default_value=None),
+            'random_state': O.IntegerOption(default_value=None),
             'verbose': O.BooleanOption(default_value=False),
             'scoring': O.StringOption(default_value=None),
             'loss': O.StringOption(
@@ -639,7 +641,7 @@ class GradientBoostingClassifier(BaseGradientBoostingMachine, ClassifierMixin):
         return encoded_y
 
     def _get_loss(self):
-        if self.options['loss'] == 'auto':
+        if self._options['loss'] == 'auto':
             if self.n_trees_per_iteration_ == 1:
                 return _LOSSES['binary_crossentropy']()
             else:

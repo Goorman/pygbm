@@ -30,9 +30,8 @@ class TreePredictor:
     nodes : list of PREDICTOR_RECORD_DTYPE.
         The nodes of the tree.
     """
-    def __init__(self, nodes, has_numerical_thresholds=True):
+    def __init__(self, nodes):
         self.nodes = nodes
-        self.has_numerical_thresholds = has_numerical_thresholds
 
     def get_n_leaf_nodes(self):
         """Return number of leaves."""
@@ -57,12 +56,6 @@ class TreePredictor:
         """
         # TODO: introspect X to dispatch to numerical or categorical data
         # (dense or sparse) on a feature by feature basis.
-
-        if not self.has_numerical_thresholds:
-            raise ValueError(
-                'This predictor does not have numerical thresholds so it can'
-                'only predict pre-binned data.'
-            )
 
         if X.dtype == np.uint8:
             raise ValueError(

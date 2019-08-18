@@ -170,6 +170,7 @@ class TreeGrower:
         self.min_gain_to_split = options['min_gain_to_split']
         self.max_bins = options['max_bins']
         self.n_bins_per_feature = dataset.n_bins_per_feature
+        self.numerical_thresholds = dataset.numerical_thresholds
         self.l2_regularization = options['b_l2_reg']
         self.min_hessian_to_split = options['min_hessian_to_split']
         self.shrinkage = options['learning_rate']
@@ -417,7 +418,7 @@ class TreeGrower:
             node = self.splittable_nodes.pop()
             self._finalize_leaf(node)
 
-    def make_predictor(self, numerical_thresholds=None):
+    def make_predictor(self):
         """Make a TreePredictor object out of the current tree.
 
         Parameters
@@ -430,12 +431,13 @@ class TreeGrower:
         -------
         A TreePredictor object.
         """
+
         predictor_nodes = np.zeros(self.n_nodes, dtype=PREDICTOR_RECORD_DTYPE)
         self._fill_predictor_node_array(
             predictor_nodes, self.root,
-            numerical_thresholds=numerical_thresholds
+            numerical_thresholds=self.numerical_thresholds
         )
-        has_numerical_thresholds = numerical_thresholds is not None
+        has_numerical_thresholds = self.numerical_thresholds is not None
         return TreePredictor(nodes=predictor_nodes,
                              has_numerical_thresholds=has_numerical_thresholds)
 

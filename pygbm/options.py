@@ -39,12 +39,12 @@ class PositiveFloatOption(Option):
             return self.default_value
         if self.none_value is not None and self.none_value == value:
             return None
-        if not isinstance(value, float):
-            raise ValueError("value must be float")
+        if not isinstance(value, (int, float)):
+            raise ValueError("value must be numerical")
         if value <= 0:
             raise ValueError("value must be positive")
         if self.max_value is not None and value > self.max_value:
-            raise ValueError(f"value must be no more than {self.max_value}")
+            raise ValueError(f"value must not be larger than {self.max_value}")
         return value
 
     @property
@@ -52,9 +52,10 @@ class PositiveFloatOption(Option):
         return self._default_value
 
 
-class PositiveIntegerOption(Option):
-    def __init__(self, default_value, max_value=None, none_value=None):
+class IntegerOption(Option):
+    def __init__(self, default_value, min_value=None, max_value=None, none_value=None):
         self._default_value = default_value
+        self.min_value = min_value
         self.max_value = max_value
         self.none_value = none_value
         super().__init__()
@@ -66,15 +67,20 @@ class PositiveIntegerOption(Option):
             return None
         if not isinstance(value, int):
             raise ValueError("value must be integer")
-        if value <= 0:
-            raise ValueError("value must be positive")
         if self.max_value is not None and value > self.max_value:
-            raise ValueError(f"value must be no more than {self.max_value}")
+            raise ValueError(f"value must not be larger than {self.max_value}")
+        if self.min_value is not None and value < self.min_value:
+            raise ValueError(f"value must not be lesser than {self.min_value}")
         return value
 
     @property
     def default_value(self):
         return self._default_value
+
+
+class PositiveIntegerOption(IntegerOption):
+    def __init__(self, default_value, max_value=None, none_value=None):
+        super().__init__(default_value, min_value=1, max_value=max_value, none_value=none_value)
 
 
 class BooleanOption(Option):
