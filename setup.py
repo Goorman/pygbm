@@ -73,7 +73,7 @@ setup(
     ],
     cmdclass={'clean': CleanCommand},
     platforms='any',
-    install_requires=['numpy', 'scipy', 'scikit-learn', 'numba'],
+    install_requires=['numpy', 'scipy', 'scikit-learn', 'numba', 'pandas'],
     python_requires='>=3.6',
     tests_require=['pytest'],
 )

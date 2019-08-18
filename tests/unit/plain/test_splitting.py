@@ -3,8 +3,8 @@ from numpy.testing import assert_almost_equal
 from numpy.testing import assert_array_almost_equal
 import pytest
 
-from pygbm.splitting import _find_histogram_split
-from pygbm.splitting import (SplittingContext, find_node_split,
+from pygbm.plain.splitting import _find_histogram_split
+from pygbm.plain.splitting import (SplittingContext, find_node_split,
                              find_node_split_subtraction,
                              split_indices)
 

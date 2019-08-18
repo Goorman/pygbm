@@ -1,6 +1,5 @@
 import numpy as np
 from numpy.testing import assert_almost_equal
-from scipy.optimize import newton
 from scipy.special import logsumexp
 from sklearn.utils import assert_all_finite
 import pytest
@@ -48,37 +47,43 @@ def get_derivatives_helper(loss):
     return get_gradients, get_hessians
 
 
-@pytest.mark.parametrize('loss, x0, y_true', [
-    ('least_squares', -2., 42),
-    ('least_squares', 117., 1.05),
-    ('least_squares', 0., 0.),
-    ('binary_crossentropy', 0.3, 0),
-    ('binary_crossentropy', -12, 1),
-    ('binary_crossentropy', 30, 1),
+@pytest.mark.parametrize('loss, x0, data, minimum', [
+    ('least_squares', -2, [36, 42], 39),
+    ('least_squares', 117., [1.05], 1.05),
+    ('least_squares', 0., [0.], 0),
+    ('binary_crossentropy', 1, [0,0,1], 0.33333334),
+    ('binary_crossentropy', -1, [1,1,0], 0.6666666),
+    ('binary_crossentropy', -0.5, [1,0,1], 0.6666666),
 ])
-def test_derivatives(loss, x0, y_true):
+def test_derivatives(loss, x0, data, minimum):
     # Check that gradients are zero when the loss is minimized on 1D array
     # using the Newton-Raphson and the first and second order derivatives
     # computed by the Loss instance.
 
     loss = _LOSSES[loss]()
-    y_true = np.array([y_true], dtype=np.float32)
     x0 = np.array([x0], dtype=np.float32).reshape(1, 1)
     get_gradients, get_hessians = get_derivatives_helper(loss)
 
+    def newton(func, fprime, fprime2, x0, maxiter=50, tol=1e-8):
+        for iter in range(maxiter):
+            dx = fprime(x0) / fprime2(x0)
+            if abs(dx) < tol:
+                return x0, func(x0)
+            x0 = x0 - dx
+        raise ValueError("Newton method did not converge")
+
     def func(x):
-        return loss(y_true, x)
+        return np.mean([loss(np.array([y_true], dtype=np.float32), x) for y_true in data])
 
     def fprime(x):
-        return get_gradients(y_true, x)
+        return np.mean([get_gradients(np.array([y_true], dtype=np.float32), x) for y_true in data])
 
     def fprime2(x):
-        return get_hessians(y_true, x)
+        return np.mean([get_hessians(np.array([y_true], dtype=np.float32), x) for y_true in data])
 
-    optimum = newton(func, x0=x0, fprime=fprime, fprime2=fprime2)
-    assert np.allclose(loss.inverse_link_function(optimum), y_true)
-    assert np.allclose(loss(y_true, optimum), 0)
-    assert np.allclose(get_gradients(y_true, optimum), 0)
+    optimum, optimal_loss = newton(func, fprime, fprime2, x0=x0)
+    assert np.allclose(loss.inverse_link_function(optimum), minimum)
+    assert np.allclose(fprime(optimum), 0)
 
 
 @pytest.mark.parametrize('loss, n_classes, prediction_dim', [

@@ -2,21 +2,24 @@ import numpy as np
 from sklearn.datasets import make_classification
 import pytest
 from pygbm.binning import BinMapper
-from pygbm.grower import TreeGrower
+from pygbm.plain.grower import TreeGrower
 from pygbm import GradientBoostingRegressor
 from pygbm import GradientBoostingClassifier
 
-X, y = make_classification(n_samples=150, n_classes=2, n_features=5,
+
+@pytest.fixture
+def classification_data():
+    return make_classification(n_samples=150, n_classes=2, n_features=5,
                            n_informative=3, n_redundant=0,
                            random_state=0)
 
 
-def test_plot_grower(tmpdir):
+def test_plot_grower(tmpdir, classification_data):
     pytest.importorskip('graphviz')
     from pygbm.plotting import plot_tree
 
-    X_binned = BinMapper().fit_transform(X)
-    gradients = np.asarray(y, dtype=np.float32).copy()
+    X_binned = BinMapper().fit_transform(classification_data[0])
+    gradients = np.asarray(classification_data[1], dtype=np.float32).copy()
     hessians = np.ones(1, dtype=np.float32)
     grower = TreeGrower(X_binned, gradients, hessians, max_leaf_nodes=5)
     grower.grow()
@@ -25,13 +28,13 @@ def test_plot_grower(tmpdir):
     assert filename.exists()
 
 
-def test_plot_estimator(tmpdir):
+def test_plot_estimator(tmpdir, classification_data):
     pytest.importorskip('graphviz')
     from pygbm.plotting import plot_tree
 
     n_trees = 3
     est = GradientBoostingRegressor(max_iter=n_trees)
-    est.fit(X, y)
+    est.fit(classification_data[0], classification_data[1])
     for i in range(n_trees):
         filename = tmpdir.join('plot_predictor.pdf')
         plot_tree(est, tree_index=i, view=False, filename=filename)
