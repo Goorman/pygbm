@@ -77,6 +77,7 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
             self._do_validation = True
             X_val, y_val = eval_set[0], eval_set[1]
             X_val = np.ascontiguousarray(X_val)
+            n_samples_val = X_val.shape[0]
         else:
             self._do_validation = False
             X_val, y_val = None, None
@@ -102,6 +103,7 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
                 y_small_train = y_train
             # Predicting is faster of C-contiguous arrays.
             X_small_train = np.ascontiguousarray(X_small_train)
+            n_samples_small_train = X_small_train.shape[0]
 
         if self.verbose:
             print("Fitting gradient boosted rounds:")
@@ -132,7 +134,21 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
         # est.predict() or est.predict_proba() depending on its nature.
         self.scorer_ = check_scoring(self, self._options['scoring'])
         self.train_scores_ = []
+        if do_early_stopping:
+            self._train_predictions = np.zeros(
+                shape=(n_samples_small_train, self.n_trees_per_iteration_),
+                dtype=self.baseline_prediction_.dtype
+            )
+            self._train_predictions += self.baseline_prediction_
+
         self.validation_scores_ = []
+        if self._do_validation:
+            self._validation_predictions = np.zeros(
+                shape=(n_samples_val, self.n_trees_per_iteration_),
+                dtype=self.baseline_prediction_.dtype
+            )
+            self._validation_predictions += self.baseline_prediction_
+
         if do_early_stopping:
             # Add predictions of the initial model (before the first tree)
             self.train_scores_.append(
@@ -197,7 +213,7 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
             if do_early_stopping:
                 should_early_stop = self._check_early_stopping(
                     X_small_train, y_small_train,
-                    X_val, y_val)
+                    X_val, y_val, iteration, iteration+1)
 
             if self._options['verbose']:
                 self._print_iteration_stats(iteration_start_time,
@@ -229,18 +245,19 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
         return self
 
     def _check_early_stopping(self, X_train, y_train,
-                              X_val, y_val):
+                              X_val, y_val, n_tree_start, n_tree_end):
         """Check if fitting should be early-stopped.
 
         Scores are computed on validation data or on training data.
         """
 
         self.train_scores_.append(
-            self._get_scores(X_train, y_train))
-
+            self._update_scores(X_train, y_train, self._train_predictions, n_tree_start, n_tree_end)
+        )
         if self._do_validation:
             self.validation_scores_.append(
-                self._get_scores(X_val, y_val))
+                self._update_scores(X_val, y_val, self._validation_predictions, n_tree_start, n_tree_end)
+            )
             return self._should_stop(self.validation_scores_)
 
         return self._should_stop(self.train_scores_)
@@ -264,6 +281,23 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
         recent_improvements = [score > reference_score
                                for score in recent_scores]
         return not any(recent_improvements)
+
+    def _update_scores(self, X, y, predictions, n_tree_start, n_tree_end):
+        """Update scores on data X with target y.
+
+        Scores are either computed with a scorer if scoring parameter is not
+        None, else with the loss. As higher is always better, we return
+        -loss_value.
+        """
+        predictions = self._update_predict(X, predictions, n_tree_start, n_tree_end)
+
+        if self.scoring is not None:
+            #TODO: Optimize custom scorer
+            return self.scorer_(self, X, y)
+
+        # Else, use the negative loss as score.
+
+        return -self.loss_(y, predictions)
 
     def _get_scores(self, X, y):
         """Compute scores on data X with target y.
@@ -312,7 +346,18 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
 
         print(log_msg)
 
-    def _raw_predict(self, X, n_trees=None):
+    def _update_predict(self, X, prediction, n_tree_start=0, n_tree_end=0):
+        n_tree_end = n_tree_end if n_tree_end != 0 else None
+        predictors = self.predictors_[n_tree_start:n_tree_end]
+
+        # Should we parallelize this?
+        for predictors_of_ith_iteration in predictors:
+            for k, predictor in enumerate(predictors_of_ith_iteration):
+                prediction[:, k] += predictor.predict(X)
+
+        return prediction
+
+    def _raw_predict(self, X, n_tree_start=0, n_tree_end=0):
         """Return the sum of the leaves values over all predictors.
 
         Parameters
@@ -342,14 +387,7 @@ class BaseGradientBoostingMachine(BaseEstimator, ABC):
         )
         raw_predictions += self.baseline_prediction_
 
-        if n_trees is None or n_trees <= 0 or n_trees > len(self.predictors_) or not isinstance(n_trees, int):
-            predictors = self.predictors_
-        else:
-            predictors = self.predictors_[:n_trees]
-        # Should we parallelize this?
-        for predictors_of_ith_iteration in predictors:
-            for k, predictor in enumerate(predictors_of_ith_iteration):
-                raw_predictions[:, k] += predictor.predict(X)
+        raw_predictions = self._update_predict(X, raw_predictions, n_tree_start, n_tree_end)
 
         return raw_predictions
 
@@ -460,7 +498,7 @@ class GradientBoostingRegressor(BaseGradientBoostingMachine, RegressorMixin):
             )
         }
 
-    def predict(self, X, n_trees=None):
+    def predict(self, X, n_tree_start=0, n_tree_end=0):
         """Predict values for X.
 
         Parameters
@@ -479,7 +517,7 @@ class GradientBoostingRegressor(BaseGradientBoostingMachine, RegressorMixin):
         """
         # Return raw predictions after converting shape
         # (n_samples, 1) to (n_samples,)
-        return self._raw_predict(X, n_trees).ravel()
+        return self._raw_predict(X, n_tree_start, n_tree_end).ravel()
 
     def _encode_y(self, y):
         # Just convert y to float32
@@ -588,7 +626,7 @@ class GradientBoostingClassifier(BaseGradientBoostingMachine, ClassifierMixin):
             )
         }
 
-    def predict(self, X):
+    def predict(self, X, n_tree_start=0, n_tree_end=0):
         """Predict classes for X.
 
         Parameters
@@ -604,10 +642,10 @@ class GradientBoostingClassifier(BaseGradientBoostingMachine, ClassifierMixin):
             The predicted classes.
         """
         # This could be done in parallel
-        encoded_classes = np.argmax(self.predict_proba(X), axis=1)
+        encoded_classes = np.argmax(self.predict_proba(X, n_tree_start, n_tree_end), axis=1)
         return self.classes_[encoded_classes]
 
-    def predict_proba(self, X, n_trees=None):
+    def predict_proba(self, X, n_tree_start=0, n_tree_end=0):
         """Predict class probabilities for X.
 
         Parameters
@@ -622,7 +660,7 @@ class GradientBoostingClassifier(BaseGradientBoostingMachine, ClassifierMixin):
         p : array, shape (n_samples, n_classes)
             The class probabilities of the input samples.
         """
-        raw_predictions = self._raw_predict(X, n_trees)
+        raw_predictions = self._raw_predict(X, n_tree_start, n_tree_end)
         return self.loss_.predict_proba(raw_predictions)
 
     def _encode_y(self, y):

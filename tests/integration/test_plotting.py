@@ -2,9 +2,12 @@ import numpy as np
 from sklearn.datasets import make_classification
 import pytest
 from pygbm.binning import BinMapper
+from pygbm.dataset import Dataset
 from pygbm.plain.grower import TreeGrower
 from pygbm import GradientBoostingRegressor
 from pygbm import GradientBoostingClassifier
+from pygbm.loss import BinaryCrossEntropy
+from pygbm.options import OptionSet
 
 
 @pytest.fixture
@@ -18,10 +21,33 @@ def test_plot_grower(tmpdir, classification_data):
     pytest.importorskip('graphviz')
     from pygbm.plotting import plot_tree
 
-    X_binned = BinMapper().fit_transform(classification_data[0])
-    gradients = np.asarray(classification_data[1], dtype=np.float32).copy()
-    hessians = np.ones(1, dtype=np.float32)
-    grower = TreeGrower(X_binned, gradients, hessians, max_leaf_nodes=5)
+    dataset = Dataset(classification_data[0], classification_data[1])
+    n_trees_per_iteration = 1
+    loss = BinaryCrossEntropy()
+
+    clf = GradientBoostingClassifier()
+
+    gradients, hessians = loss.init_gradients_and_hessians(
+        n_samples=dataset.shape[0],
+        prediction_dim=n_trees_per_iteration
+    )
+    y = clf._encode_y(dataset.y)
+    baseline_prediction_ = loss.get_baseline_prediction(
+        y, 1)
+    raw_predictions = np.zeros(
+        shape=(dataset.shape[0], n_trees_per_iteration),
+        dtype=baseline_prediction_.dtype
+    )
+    raw_predictions += baseline_prediction_
+
+    loss.update_gradients_and_hessians(
+        gradients, hessians, y, raw_predictions
+    )
+
+    options = OptionSet(clf.parameter_dict)
+    options['max_leaf_nodes'] = 5
+
+    grower = TreeGrower(dataset, gradients, hessians, options)
     grower.grow()
     filename = tmpdir.join('plot_grower.pdf')
     plot_tree(grower, view=False, filename=filename)
