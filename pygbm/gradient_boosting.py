@@ -685,4 +685,4 @@ class GradientBoostingClassifier(BaseGradientBoostingMachine, ClassifierMixin):
             else:
                 return _LOSSES['categorical_crossentropy']()
 
-        return _LOSSES[self.options['loss']]()
+        return _LOSSES[self._options['loss']]()

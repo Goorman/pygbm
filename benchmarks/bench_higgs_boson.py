@@ -10,17 +10,16 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, roc_auc_score
 from joblib import Memory
 from pygbm import GradientBoostingClassifier
-from pygbm.utils import get_lightgbm_estimator
 import numba
 
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--n-leaf-nodes', type=int, default=31)
 parser.add_argument('--n-trees', type=int, default=10)
-parser.add_argument('--no-lightgbm', action="store_true", default=False)
 parser.add_argument('--learning-rate', type=float, default=1.)
 parser.add_argument('--subsample', type=int, default=None)
 parser.add_argument('--max-bins', type=int, default=255)
+parser.add_argument('--tree-type', type=str, default='plain')
 args = parser.parse_args()
 
 HERE = os.path.dirname(__file__)
@@ -33,7 +32,7 @@ n_trees = args.n_trees
 subsample = args.subsample
 lr = args.learning_rate
 max_bins = args.max_bins
-
+tree_type = args.tree_type
 
 @m.cache
 def load_data():
@@ -71,7 +70,8 @@ pygbm_model = GradientBoostingClassifier(learning_rate=lr, max_iter=1,
                                          max_leaf_nodes=n_leaf_nodes,
                                          n_iter_no_change=None,
                                          random_state=0,
-                                         verbose=0)
+                                         verbose=False,
+					                     tree_type=tree_type)
 pygbm_model.fit(data_train[:100], target_train[:100])
 pygbm_model.predict(data_train[:100])  # prediction code is also jitted
 toc = time()
@@ -85,7 +85,8 @@ pygbm_model = GradientBoostingClassifier(loss='binary_crossentropy',
                                          max_leaf_nodes=n_leaf_nodes,
                                          n_iter_no_change=None,
                                          random_state=0,
-                                         verbose=1)
+                                         verbose=True,
+                                         tree_type=tree_type)
 pygbm_model.fit(data_train, target_train)
 toc = time()
 predicted_test = pygbm_model.predict(data_test)
@@ -95,14 +96,3 @@ print(f"done in {toc - tic:.3f}s, ROC AUC: {roc_auc:.4f}, ACC: {acc :.4f}")
 
 if hasattr(numba, 'threading_layer'):
     print("Threading layer chosen: %s" % numba.threading_layer())
-
-if not args.no_lightgbm:
-    print("Fitting a LightGBM model...")
-    tic = time()
-    lightgbm_model = get_lightgbm_estimator(pygbm_model)
-    lightgbm_model.fit(data_train, target_train)
-    toc = time()
-    predicted_test = lightgbm_model.predict(data_test)
-    roc_auc = roc_auc_score(target_test, predicted_test)
-    acc = accuracy_score(target_test, predicted_test)
-    print(f"done in {toc - tic:.3f}s, ROC AUC: {roc_auc:.4f}, ACC: {acc :.4f}")
